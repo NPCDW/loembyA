@@ -45,8 +45,8 @@ android {
     targetSdk = 36
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     // versionCode 决定能否覆盖安装：每发一版都要涨（APK 里的最终值 = versionCode * 10 + ABI 码）
-    versionCode = 237
-    versionName = "0.2.0"
+    versionCode = 238
+    versionName = "0.2.1"
 
     vectorDrawables {
       useSupportLibrary = true

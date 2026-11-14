@@ -28,7 +28,7 @@ class AboutProjectContractTest {
   @Test fun gradleRetainsRealVersionAndSigningConfigurationWithoutOldReleaseJournal() {
     val gradle = source("build.gradle.kts")
     assertTrue(gradle.contains("versionCode = 237"))
-    assertTrue(gradle.contains("versionName = \"0.1.0\""))
+    assertTrue(gradle.contains("versionName = \"0.2.0\""))
     assertTrue(gradle.contains("externalReleaseSigning"))
     assertFalse(gradle.contains("修复轮不涨名"))
     assertFalse(gradle.contains("versionCode 62"))
