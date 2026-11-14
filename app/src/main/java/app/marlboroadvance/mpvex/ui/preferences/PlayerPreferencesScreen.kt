@@ -27,7 +27,6 @@ import androidx.compose.material.icons.outlined.PictureInPictureAlt
 import androidx.compose.material.icons.outlined.PlaylistPlay
 import androidx.compose.material.icons.outlined.Save
 import androidx.compose.material.icons.outlined.ScreenRotation
-import androidx.compose.material.icons.outlined.SdCard
 import androidx.compose.material.icons.outlined.SkipNext
 import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.Storage
@@ -461,11 +460,8 @@ object PlayerPreferencesScreen : Screen {
 
               PreferenceDivider()
 
-              // ── 落盘播放缓存（清单 #18）──
-              // 开关 + 上限 + 清除三件套。上限滑杆在开关关着时也照样能调：
-              // 用户往往是先调好上限、回头再打开开关，硬禁用会让人以为设置坏了。
+              // Native disk buffering is temporary; shared demuxer limits control the playback window.
               val diskCacheEnabled by preferences.diskCacheEnabled.collectAsState()
-              val diskCacheSizeMb by preferences.diskCacheSizeMb.collectAsState()
               val scope = rememberCoroutineScope()
               // -1 = 还没量过。跟「真的是 0 字节」区分开，否则第一次进页面
               // 在清完缓存后会分不清该不该刷新显示。
@@ -491,32 +487,6 @@ object PlayerPreferencesScreen : Screen {
                 summary = {
                   Text(
                     text = stringResource(R.string.pref_player_disk_cache_summary),
-                    color = MaterialTheme.colorScheme.outline,
-                  )
-                },
-              )
-
-              PreferenceDivider()
-
-              SliderPreference(
-                icon = {
-                  Icon(
-                    Icons.Outlined.SdCard,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                  )
-                },
-                value = diskCacheSizeMb.toFloat(),
-                onValueChange = { preferences.diskCacheSizeMb.set(it.roundToInt()) },
-                sliderValue = diskCacheSizeMb.toFloat(),
-                onSliderValueChange = { preferences.diskCacheSizeMb.set(it.roundToInt()) },
-                modifier = Modifier.settingsAnchor(R.string.pref_player_disk_cache_size),
-                title = { Text(text = stringResource(R.string.pref_player_disk_cache_size), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                valueRange = MpvDiskCache.MIN_SIZE_MB.toFloat()..MpvDiskCache.MAX_SIZE_MB.toFloat(),
-                summary = {
-                  Text(
-                    text = stringResource(R.string.pref_player_disk_cache_size_summary) +
-                      " ($diskCacheSizeMb MB)",
                     color = MaterialTheme.colorScheme.outline,
                   )
                 },
@@ -551,8 +521,7 @@ object PlayerPreferencesScreen : Screen {
               if (showClearCache) {
                 ConfirmDialog(
                   title = "清除播放缓存",
-                  subtitle = "将删除已缓存的网络流数据。之后重看同一部片子需要重新下载，" +
-                    "已经下载到本地的文件（离线下载）不受影响。",
+                  subtitle = "将删除未使用的临时播放缓冲。此缓冲不支持离线播放或跨会话复用。",
                   onConfirm = {
                     showClearCache = false
                     scope.launch {

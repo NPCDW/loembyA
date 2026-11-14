@@ -32,6 +32,7 @@ import app.marlboroadvance.mpvex.domain.emby.EmbyScanChunk
 import app.marlboroadvance.mpvex.domain.emby.EmbyScanQuery
 import app.marlboroadvance.mpvex.domain.emby.EmbyServer
 import app.marlboroadvance.mpvex.domain.emby.playback.LoopbackPlaybackServer
+import app.marlboroadvance.mpvex.domain.emby.playback.PlaybackDetailOrigin
 import app.marlboroadvance.mpvex.domain.emby.playback.PlaybackSpec
 import app.marlboroadvance.mpvex.domain.emby.EmbyTicks
 import app.marlboroadvance.mpvex.domain.emby.StreamProbe
@@ -706,18 +707,9 @@ class EmbyViewModel(application: Application, private val boundServer: EmbyServe
   /**
    * 取「继续观看」= 服务端结果 + 本地最近播放账本。
    *
-   * ## 为什么要另加账本（v231）
-   *
-   * 服务端 `Items/Resume` **是按 `LastPlayedDate` 降序排的**（实测首页前 8 条时间戳严格递减），
-   * 所以排序本身没问题；问题在**写入端**：条目只有在那次播放刷新了 `LastPlayedDate`
-   * 才会被顶到前面，而我们的上报过去只写了播放位置（详情页有进度、位次不动）。
-   * 实测有一条卡的正是第 21 位 —— 首页只要 20 条，差一位就整条消失。
-   *
-   * 治本那条已经在做（上报改用 PlaybackInfo 的服务端会话），但服务端「什么时候盖时间戳」
-   * 不是我们能保证的，所以客户端再兜一层：最近播过的、服务端那批结果里没有的，
-   * 用一次 `Ids=` 批量请求补回来，并按本地时间排到最前。
-   *
-   * 任何一步失败都退回纯服务端结果 —— 这条兜底绝不能让首页变空或报错。
+   * 服务端时间戳更新时机无法保证；最近播放条目可能落在 Resume 的返回数量之外。
+   * 将本地最近播过却不在服务端结果中的条目通过一次 `Ids=` 批量请求补回，
+   * 并按本地时间排到最前。任何一步失败都退回纯服务端结果，不能让首页变空或报错。
    */
   private suspend fun fetchResume(server: EmbyServer, limit: Int): List<EmbyItem> {
     val fromServer = repository.getResumeItems(server, limit)
@@ -957,20 +949,10 @@ class EmbyViewModel(application: Application, private val boundServer: EmbyServe
    *
    * 失败返回 null，调用方回退到原始流地址 —— 解析失败绝不挡播放。
    *
-   * ## 为什么必须限时（v139 修的「第一次播放卡在加载中」）
-   *
-   * 调用方是 [play]，它**拿到本函数的返回值之后才拉起播放器** —— 这条请求因此
-   * 直接决定「点播放到播放页出现」要等多久。而 strm 条目在服务端还没 probe 过
-   * 源文件时（详情页「没有媒体信息」正是这个状态），`/Videos/{id}/stream` 会先让
-   * 服务端去读远端文件、把大小/时长写库，这一次能挂到分钟级。
-   *
-   * 于是有了那个典型现象：
-   * · **第一次**点播放 → 卡在这里，播放器一直不出现；
-   * · 返回上一级重新进详情页 → 服务端 probe 已完成、媒体信息补上了，探测秒回 → 立马能播。
-   *
-   * 两道闸：单次调用 3 秒（[EmbyClient.resolveStreamUrl] 的 `callTimeoutMs`），
-   * 且**只发一次不重试** —— 慢路径重试注定还是慢，只是把等待翻倍。
-   * 超时按 [StreamProbe.Unknown] 处理，地址原样交给播放器去跟 302。
+   * ## 起播路径必须限时
+   * [play] 等待此返回值才拉起播放器；尚未 probe 的 strm 源可能让服务端探测耗时很长。
+   * 使用 [EmbyClient.resolveStreamUrl] 的单次超时且不重试，避免成倍增加起播等待。
+   * 超时按 [StreamProbe.Unknown] 处理，保留原始地址供播放路径解析。
    */
   suspend fun resolveDirectUrl(
     server: EmbyServer,
@@ -1031,6 +1013,7 @@ class EmbyViewModel(application: Application, private val boundServer: EmbyServe
     versionSelect: Int = 1,
     useDirectLink: Boolean? = null,
     selectionCurrentItemOnly: Boolean = false,
+    detailOrigin: PlaybackDetailOrigin? = null,
   ) {
     requireBoundServer(server)
     repository.sessionServer(server)
@@ -1089,6 +1072,7 @@ class EmbyViewModel(application: Application, private val boundServer: EmbyServe
         startItemId = itemIdToPlay, videoSelect = videoSelect, audioSelect = audioSelect,
         subtitleSelect = subtitleSelect, selectPolicy = selectPolicy, versionSelect = versionSelect,
         useDirectLink = useDirectLink, selectionCurrentItemOnly = selectionCurrentItemOnly,
+        detailOrigin = detailOrigin,
       )
     } catch (cancelled: CancellationException) {
       throw cancelled
@@ -1202,6 +1186,7 @@ class EmbyViewModel(application: Application, private val boundServer: EmbyServe
     versionSelect: Int = 1,
     useDirectLink: Boolean? = null,
     selectionCurrentItemOnly: Boolean = false,
+    detailOrigin: PlaybackDetailOrigin? = null,
   ) {
     requireBoundServer(server)
     val supported = EmbyItemPolicy.filterSupported(items).filter { !it.Id.isNullOrBlank() }
@@ -1274,6 +1259,7 @@ class EmbyViewModel(application: Application, private val boundServer: EmbyServe
           playlistTotal = items.size,
           explicitMediaSourceId = if (index == startIndex) firstMediaSourceId else null,
           overrideUrl = directUrls[id],
+          detailOrigin = detailOrigin,
         ).forPlaylistEntry(index == startIndex, selectionCurrentItemOnly))
       }
       uris.add(android.net.Uri.parse(url))

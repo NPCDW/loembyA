@@ -499,12 +499,9 @@ val MIGRATION_9_10 = object : Migration(9, 10) {
  *
  * ## 为什么这是一个「空迁移」，却必须存在
  *
- * v11 那次发版**只改了别的**（不是数据库），schema 与 v10 完全一致
- * （对比 `app/schemas/…/10.json` 与 `11.json`：表、列、索引逐条一致）。
- * 但 Room 的迁移是靠 `addMigrations` 里注册的相邻版本对来串路径的，
- * **不会因为 schema 没变就自动跳过** —— 缺了 10→11 这一段，
- * v10 的用户升到 v12 时找不到完整路径，数据库会拒绝打开。
- * v22 起已移除 destructive fallback，迁移缺口不得再被静默删库掩盖。
+ * 数据库版本 10 与 11 的 schema 一致（表、列、索引可对照各自导出的 schema）。
+ * Room 仍需要注册 10→11 迁移才能串成完整升级路径；schema 不变也不会自动跳过。
+ * 缺少此段会使 10→12 升级拒绝打开数据库；不允许用 destructive fallback 掩盖缺口。
  *
  * 所以哪怕 migrate 体是空的，也必须注册，Room 会在事务里自己把
  * `user_version` 递到 11，再由 [MIGRATION_11_12] 建 search_history。

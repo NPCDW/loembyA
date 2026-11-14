@@ -397,18 +397,9 @@ object EmbyClient {
   /**
    * 继续观看。
    *
-   * ## ⚠️ 不要再按类型过滤（v229）
-   *
-   * 原来默认传 `IncludeItemTypes=Movie,Series`，理由写着「单集属于剧集内部层级，放在
-   * 继续观看里会显得零散」。后果是从**详情页点某一集**播放之后，那一集的类型是
-   * `Episode` —— 服务端直接把它从 Resume 结果里滤掉：详情页明明有进度、首页那一行却
-   * 始终没有它，用户侧就是「有些上报了但继续观看里看不到」。
-   *
-   * 现在按 [Yamby v2.1.0.11] 的做法：**不传 `IncludeItemTypes`**，只用
-   * `MediaTypes=Video` + `Recursive=true` 圈定范围，让服务端按自己的 Resume 语义决定
-   * 返回哪一条（电影返回电影、剧集返回那一集）。Emby 官方客户端也是这个口径。
-   *
-   * 需要收窄时再显式传 [includeItemTypes]（目前没有调用方这么做）。
+   * 不默认按条目类型过滤：`Episode` 必须能够出现在继续观看结果中。
+   * 使用 `MediaTypes=Video` 与 `Recursive=true` 圈定范围，让服务端决定返回电影或单集。
+   * 需要收窄时再显式传 [includeItemTypes]。
    */
   fun getResumeItems(
     server: EmbyServer,
@@ -1806,14 +1797,8 @@ object EmbyClient {
    * 预解析「302 直链」：拿 `/Videos/{id}/stream` 背后跳转到的真实地址，
    * **同时**把这次的 HTTP 状态码翻译成「能不能播」的结论。
    *
-   * ## 为什么要带出状态码（v128）
-   *
-   * 这个方法本来就会发一次 `Range: bytes=0-0`。以前它只把结果当「直链」用，
-   * 被拒（403 / 404）时静默返回 null、让调用方回退原始地址 —— 于是死链照样被交给
-   * mpv，而 mpv 遇到死链会在 native 层崩掉（整个 App 消失，Java 层拦不到）。
-   *
-   * 现在把**本来就已经拿到手**的 `resp.code` 一并翻译出来：调用方据此在起播前拦下死链。
-   * **不额外发任何请求** —— 防崩能力是白捡的，这是刻意的设计约束。
+   * Range 探测已经取得状态码，将其一并返回可在起播前拦下明确不可用的流，
+   * 避免把死链交给 native 播放器；不为此额外发送请求。
    *
    * ## 判定口径
    *
@@ -2107,8 +2092,8 @@ object EmbyClient {
   /**
    * 上报播放开始。调用时机：播放页准备开始播放时。
    *
-   * @param playSessionId **客户端自己生成的**会话 id（见下方说明）。传了就会写进 body，
-   *   返回值也会在服务端不回显时退回它。
+   * @param playSessionId 优先使用服务端签发的会话 id；不可用时传本地 UUID。
+   *   传了就会写进 body，返回值也会在服务端不回显时退回它。
    * @return 本次播放的会话 id —— 服务端回显的就用它的，否则就是传进来的那个。
    */
   /**
@@ -2117,18 +2102,9 @@ object EmbyClient {
    * @return `PlaySessionId to MediaSources[0].Id`；拿不到（老版本 / 该条目没有可用源 / 网络失败）
    *   返回 null，调用方退回自生成的 UUID。
    *
-   * ## 为什么要这一步（v231）
-   *
-   * v226 起我们是自己造 UUID 当 `PlaySessionId` 的 —— Start / Progress / Stopped 三处一致，
-   * 进度确实能记上（位置、百分比都对）。但「**条目什么时候被顶到继续观看最前面**」取决于
-   * 服务端有没有把 `LastPlayedDate` 刷新，而那是挂在**服务端会话**上的：自己造的 id 服务端
-   * 根本没有这条会话，收尾时就跳过了这一步。
-   *
-   * 现象因此非常割裂：详情页有进度（位置写了）、首页却不往前提（时间没写）。
-   * 实测同一条服务器上，别的播放器（Yamby 先 PlaybackInfo 再上报）播过的片会立刻排到第一。
-   *
-   * 代价：每次起播多一次请求。它和「预解析直链」无关 —— PlaybackInfo 只打到自己的 Emby，
-   * 不碰网盘 CDN，也不会跟 302。
+   * 服务端签发的会话将 Start / Progress / Stopped 与 `LastPlayedDate` 更新关联起来。
+   * 调用方优先使用此会话，失败时使用本地 UUID 保持上报连续。
+   * 此请求仅访问 Emby 的 PlaybackInfo，不解析 CDN 直链、不跟随 302。
    */
   suspend fun requestPlaybackSession(
     server: EmbyServer,

@@ -87,6 +87,44 @@ class SharedConfigurationSanitizerTest {
     }
   }
 
+  @Test fun `app and tracker routes display only sanitized selection status without forward proxies`() {
+    val raw = rawSnapshot(values = mapOf(
+      "app_reverse_proxy_id" to "app-private-id",
+      "trakt_reverse_proxy_id" to "trakt-private-id",
+      "simkl_reverse_proxy_id" to "missing-private-id",
+      "yamtrack_reverse_proxy_id" to "invalid-private-id",
+    )).copy(reverseProxies = mapOf(
+      "app-private-id" to SharedReverseProxyRaw("app-private-id", "App Gateway", "https://apprelay.test/PRIVATE-PATH?PRIVATE-QUERY"),
+      "trakt-private-id" to SharedReverseProxyRaw("trakt-private-id", "Tracker Gateway", "https://tracker.test/private-path"),
+      "invalid-private-id" to SharedReverseProxyRaw("invalid-private-id", "Invalid", "https://user:PRIVATE-PASSWORD@invalid.test/"),
+      "unused" to SharedReverseProxyRaw("unused", "UNUSED-CANARY", "https://unused.test/"),
+    ))
+    val snapshot = SharedConfigurationSanitizer.sanitize(raw)
+    val app = snapshot.sections.single { it.title == "网络与字幕" }.items.first()
+    assertEquals("应用数据、外部图标与更新反向代理", app.label)
+    assertEquals("引用无效；请求已阻止", app.value)
+    val trakt = snapshot.sections.single { it.title == "Trakt" }.items.first()
+    assertTrue(trakt.value.contains("Tracker Gateway"))
+    assertTrue(trakt.value.contains("https://t***r.test"))
+    assertEquals("引用有效", trakt.info)
+    assertEquals("引用无效；请求已阻止", snapshot.sections.single { it.title == "Simkl" }.items.first().value)
+    assertEquals("引用无效；请求已阻止", snapshot.sections.single { it.title == "YamTrack" }.items.first().value)
+    val rendered = render(snapshot)
+    listOf("app-private-id", "trakt-private-id", "missing-private-id", "PRIVATE-PATH", "PRIVATE-QUERY",
+      "PRIVATE-PASSWORD", "UNUSED-CANARY", "浏览代理", "播放代理").forEach {
+      assertFalse(it, rendered.contains(it))
+    }
+  }
+
+  @Test fun `missing route selection displays direct connection not a borrowed server route`() {
+    val snapshot = SharedConfigurationSanitizer.sanitize(rawSnapshot())
+    listOf("网络与字幕", "Trakt", "Simkl", "YamTrack").forEach { title ->
+      val route = snapshot.sections.single { it.title == title }.items.first()
+      assertEquals("未使用", route.value)
+      assertEquals("直接连接", route.info)
+    }
+  }
+
   private fun render(snapshot: SharedConfigurationSnapshot): String = buildString {
     snapshot.sections.forEach { section ->
       append(section.title); append(section.summary)

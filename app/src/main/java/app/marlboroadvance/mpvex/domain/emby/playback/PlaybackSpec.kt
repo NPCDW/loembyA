@@ -5,6 +5,9 @@ import app.marlboroadvance.mpvex.domain.emby.EmbyServer
 import app.marlboroadvance.mpvex.domain.postgres.PlaybackConfiguration
 import kotlinx.serialization.Serializable
 
+/** One detail-launched queue; reference identity prevents replay from another playback visit. */
+class PlaybackDetailOrigin(val detailEntryId: String, val itemId: String)
+
 /** In-memory registration; credentials are never put in Intent/SavedState or in the local URL. */
 data class PlaybackSpec(
   val server: EmbyServer,
@@ -31,6 +34,7 @@ data class PlaybackSpec(
   val playlistTotal: Int = 1,
   val explicitMediaSourceId: String? = null,
   val overrideUrl: String? = null,
+  val detailOrigin: PlaybackDetailOrigin? = null,
 ) {
   /** Isolate the four manual choices to the clicked item; old callers retain queue-wide choices. */
   fun forPlaylistEntry(isCurrent: Boolean, selectionCurrentItemOnly: Boolean): PlaybackSpec {

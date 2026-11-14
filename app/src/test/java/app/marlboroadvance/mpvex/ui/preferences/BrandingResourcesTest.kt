@@ -30,13 +30,14 @@ class BrandingResourcesTest {
     }
   }
 
-  @Test fun `both locales acknowledge CineIsle and retain the original project link`() {
+  @Test fun `both locales link to loembyA and retain upstream acknowledgments`() {
     for (locale in listOf("values", "values-zh-rCN")) {
       val strings = strings(locale)
-      assertEquals(locale, "https://github.com/nu1lkali/CineIsle", strings["github_repo_url"])
+      assertEquals(locale, "https://github.com/NPCDW/loembyA", strings["github_repo_url"])
       assertTrue(locale, strings.getValue("i18n_ack_cineisle_summary").contains("loembyA"))
       assertTrue(locale, strings.getValue("i18n_ack_mpvex_summary").contains("CineIsle"))
-      assertTrue(locale, strings.getValue("i18n_about_upstream_project").isNotBlank())
+      assertTrue(locale, strings.getValue("i18n_about_project_source").isNotBlank())
+      assertTrue(locale, strings.getValue("i18n_ack_licenses_summary").isNotBlank())
     }
   }
 }

@@ -1,6 +1,7 @@
 package app.marlboroadvance.mpvex.domain.postgres
 
 import app.marlboroadvance.mpvex.domain.emby.EmbyServer
+import app.marlboroadvance.mpvex.domain.emby.ReverseProxyRoute
 import java.lang.reflect.Proxy
 import java.sql.Connection
 import java.sql.PreparedStatement
@@ -14,8 +15,8 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class PlaybackConfigurationRepositoryTest {
-  @Test fun `allowlist is exact 23 Android effective keys and excludes ordinary proxies`() {
-    assertEquals(23, ANDROID_GLOBAL_CONFIG_ALLOWLIST.size)
+  @Test fun `allowlist is exact 27 Android effective keys and excludes ordinary proxies`() {
+    assertEquals(27, ANDROID_GLOBAL_CONFIG_ALLOWLIST.size)
     assertEquals(EXPECTED_KEYS, ANDROID_GLOBAL_CONFIG_ALLOWLIST)
     assertTrue(ANDROID_GLOBAL_CONFIG_ALLOWLIST.intersect(FORWARD_PROXY_KEYS).isEmpty())
     assertFalse(ANDROID_GLOBAL_CONFIG_ALLOWLIST.any {
@@ -159,12 +160,120 @@ class PlaybackConfigurationRepositoryTest {
     assertTrue(rendered.contains("redacted"))
   }
 
+  @Test fun `app and trackers use exact independent selected reverse rows with bounded reads`() = runBlocking {
+    val f = Fixture()
+    listOf("app", "trakt", "simkl", "yamtrack").forEach { service ->
+      f.values["${service}_reverse_proxy_id"] = service
+      f.reverse += linkedMapOf("id" to service, "name" to service, "url" to "https://$service-relay.test/r")
+    }
+    f.reverse += linkedMapOf("id" to "unreferenced", "name" to "Unused", "url" to "https://unused.test/")
+    val app = f.repository.appNetworkConfiguration(f.storage.token)
+    val playback = f.repository.snapshot(f.server())
+    assertEquals("https://app-relay.test/r/https://cdn.test/i%2F.png?q=a%2Bb", app.resolveUrl(
+      "https://cdn.test/i%2F.png?q=a%2Bb",
+    ))
+    assertEquals("https://trakt-relay.test/r/https://api.trakt.tv/scrobble/start",
+      playback.trakt.reverseRoute.resolveUrl("https://api.trakt.tv/scrobble/start"))
+    assertEquals("https://simkl-relay.test/r/https://api.simkl.com/scrobble/start",
+      playback.simkl.reverseRoute.resolveUrl("https://api.simkl.com/scrobble/start"))
+    assertEquals("https://yamtrack-relay.test/r/https://yam.test/hook",
+      playback.yamTrack.reverseRoute.resolveUrl("https://yam.test/hook"))
+    assertEquals(4, f.queries.size)
+    assertEquals(setOf("app", "trakt", "simkl", "yamtrack", "reverse"), f.reverseBindings.toSet())
+    assertTrue(f.queries.last().contains("WHERE id IN"))
+    assertTrue(f.queries.last().contains("LIMIT 257"))
+    assertFalse(f.reverseBindings.contains("unreferenced"))
+    assertEquals(0, f.commits)
+    assertEquals(1, f.rollbacks)
+  }
+
+  @Test fun `missing or invalid selected service row fails closed without borrowing server line route`() = runBlocking {
+    val f = Fixture()
+    f.values["app_reverse_proxy_id"] = "missing-app"
+    f.values["trakt_reverse_proxy_id"] = "invalid"
+    f.reverse += linkedMapOf("id" to "invalid", "name" to "Invalid", "url" to "not-a-url")
+    val app = f.repository.appNetworkConfiguration()
+    val playback = f.repository.snapshot(f.server())
+    assertEquals(ReverseProxyRoute.State.BLOCKED, app.reverseRoute.state)
+    assertThrows(IllegalStateException::class.java) { app.resolveUrl("https://cdn.test/icon.png") }
+    assertThrows(IllegalStateException::class.java) {
+      playback.trakt.reverseRoute.resolveUrl("https://api.trakt.tv/scrobble/start")
+    }
+    assertEquals("https://api.simkl.com/scrobble/start",
+      playback.simkl.reverseRoute.resolveUrl("https://api.simkl.com/scrobble/start"))
+  }
+
+  @Test fun `same source route changes invalidate app playback and stale server bindings on refresh`() = runBlocking {
+    val f = Fixture()
+    f.values["app_reverse_proxy_id"] = "reverse"
+    f.values["trakt_reverse_proxy_id"] = "reverse"
+    val oldServer = f.server()
+    val app = f.repository.appNetworkConfiguration()
+    val playback = f.repository.snapshot(oldServer)
+    assertTrue(f.repository.isCurrent(app))
+    assertTrue(f.repository.isCurrent(playback))
+    f.reverse[0]["url"] = "https://changed.test/r/"
+    f.repository.appNetworkConfiguration(forceRefresh = true)
+    assertFalse(f.repository.isCurrent(app))
+    assertFalse(f.repository.isCurrent(playback))
+    assertFalse(f.repository.validateCurrent(app))
+    assertFailure(PostgresFailure.SOURCE_CHANGED) { f.repository.snapshot(oldServer) }
+    assertTrue(f.repository.isCurrent(f.repository.snapshot(f.server())))
+    f.storage.change()
+    assertFalse(f.repository.isCurrent(app))
+    assertFailure(PostgresFailure.SOURCE_CHANGED) { f.repository.appNetworkConfiguration(app.source) }
+  }
+
+  @Test fun `refresh in flight preserves identity checks and async validation waits for fresh snapshot`() = runBlocking {
+    val f = Fixture()
+    val config = f.repository.snapshot(f.server())
+    val entered = java.util.concurrent.CountDownLatch(1)
+    val release = java.util.concurrent.CountDownLatch(1)
+    f.onQuery = {
+      entered.countDown()
+      check(release.await(5, java.util.concurrent.TimeUnit.SECONDS))
+    }
+    val refresh = async(kotlinx.coroutines.Dispatchers.Default) {
+      f.repository.appNetworkConfiguration(forceRefresh = true)
+    }
+    try {
+      assertTrue(entered.await(5, java.util.concurrent.TimeUnit.SECONDS))
+      assertTrue(f.repository.isCurrent(config))
+      val validation = async { f.repository.validateCurrent(config) }
+      kotlinx.coroutines.yield()
+      assertFalse(validation.isCompleted)
+      release.countDown()
+      refresh.await()
+      assertTrue(validation.await())
+    } finally { release.countDown() }
+  }
+
+  @Test fun `server reverse endpoint alone invalidates playback ownership even when tracker routes stay direct`() = runBlocking {
+    val f = Fixture()
+    val config = f.repository.snapshot(f.server())
+    f.reverse[0]["url"] = "https://other-relay.test/r/"
+    f.repository.appNetworkConfiguration(forceRefresh = true)
+    assertFalse(f.repository.isCurrent(config))
+    assertFalse(f.repository.validateCurrent(config))
+  }
+
+  @Test fun `app cache failure expires closed and no updater-specific key is invented`() = runBlocking {
+    val f = Fixture()
+    val app = f.repository.appNetworkConfiguration()
+    f.now = 60_000_000_000L
+    f.fail = true
+    assertFailure(PostgresFailure.SCHEMA_INCOMPATIBLE) { f.repository.validateCurrent(app) }
+    assertFalse(f.repository.isCurrent(app))
+    assertFalse(ANDROID_GLOBAL_CONFIG_ALLOWLIST.contains("updater_reverse_proxy_id"))
+  }
+
   private companion object {
     val EXPECTED_KEYS = linkedSetOf(
       "play_version_auto_select_policy", "prefetch_playlist", "play_param_IsPlayback",
       "mpv_cache_seconds", "mpv_cache_min_bytes", "mpv_cache_max_bytes",
       "mpv_cache_back_seconds", "mpv_cache_back_min_bytes", "mpv_cache_back_max_bytes",
       "danger_accept_invalid_certs", "subtitleStoredDays", "lastCleanSubtitleTime",
+      "app_reverse_proxy_id", "trakt_reverse_proxy_id", "simkl_reverse_proxy_id", "yamtrack_reverse_proxy_id",
       "trakt_sync_switch", "trakt_username", "trakt_access_token", "trakt_refresh_token",
       "trakt_expires_in", "trakt_redirect_uri",
       "simkl_sync_switch", "simkl_username", "simkl_access_token",
@@ -173,6 +282,8 @@ class PlaybackConfigurationRepositoryTest {
     val FORWARD_PROXY_KEYS = setOf(
       "global_browse_proxy_id",
       "global_play_proxy_id",
+      "app_proxy_id",
+      "updater_proxy_id",
       "trakt_proxy_id",
       "simkl_proxy_id",
       "yamtrack_proxy_id",
@@ -202,9 +313,12 @@ private class Fixture {
     "line_id" to "line", "reverse_proxy_id" to "reverse",
   ))
   private val lines = listOf(mapOf("id" to "line", "name" to "Primary", "emby_server_id" to "server"))
-  private val reverse = listOf(mapOf("id" to "reverse", "name" to "Gateway", "url" to "https://gateway.example/r/"))
+  val reverse = mutableListOf<MutableMap<String, Any?>>(linkedMapOf(
+    "id" to "reverse", "name" to "Gateway", "url" to "https://gateway.example/r/",
+  ))
   val queries = mutableListOf<String>()
   val globalBindings = mutableListOf<String>()
+  val reverseBindings = mutableListOf<String>()
   val readColumns = mutableSetOf<String>()
   val readCredentials = mutableSetOf<String>()
   var onQuery: () -> Unit = {}
@@ -241,7 +355,10 @@ private class Fixture {
               }
               sql.contains("FROM emby_server") -> configResultSet(servers, readColumns, readCredentials)
               sql.contains("FROM emby_line") -> configResultSet(lines, readColumns, readCredentials)
-              sql.contains("FROM reverse_proxy_server") -> configResultSet(reverse, readColumns, readCredentials)
+              sql.contains("FROM reverse_proxy_server") -> {
+                reverseBindings += bindings.values
+                configResultSet(reverse.filter { it["id"] in bindings.values }, readColumns, readCredentials)
+              }
               else -> error("Unexpected query")
             }
           }
@@ -259,6 +376,7 @@ private class Fixture {
     sourceKey = storage.token.sourceKey, sourceRevision = storage.token.revision,
     configuredBaseUrl = "https://media.example/prefix", client = "loemby", device = "Android",
     deviceId = "device-id", clientVersion = "1", userAgent = "agent", reverseProxyId = "reverse",
+    reverseProxyUrl = reverse.firstOrNull { it["id"] == "reverse" }?.get("url")?.toString().orEmpty(),
   )
 }
 

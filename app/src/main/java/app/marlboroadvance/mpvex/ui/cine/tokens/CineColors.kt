@@ -281,8 +281,7 @@ private fun mix(a: Color, b: Color, fraction: Float): Color = Color(
  *
  * ## 作用范围
  * 由 [app.marlboroadvance.mpvex.ui.cine.CineTheme] 局部覆盖，只作用于 Cine 子树。
- * 回落进 Cine 外壳的 Classic 页面（如设置）**已经在 `CineRoute` 的回落分支外**，
- * 不会经过这里 —— 这是 v130 把 `CineTheme` 收进路由表带来的额外好处。
+ * Classic 回落分支不包 `CineTheme`，不会继承此色彩覆盖。
  */
 fun cineColorScheme(base: ColorScheme): ColorScheme {
   val isLight = base.surface.luminance() > 0.5f

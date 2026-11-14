@@ -47,7 +47,7 @@ import kotlin.math.roundToInt
  *     淡出。
  *  3. **外观 / 拖动映射**：见下方「⚠️ 为什么不再用 nanihadesuka」。
  *
- * ## ⚠️⚠️ 为什么不再用 nanihadesuka LazyColumnScrollbar（v178 自绘）
+ * ## 自绘滚动条的拖动约束
  *
  * 2.2.0 的拖动实现在 `LazyGridStateController.setScrollOffset`（javap 核验），每收到一次
  * 拖动 delta 就 `launch` 一个协程，协程里**连做两次** `scrollToItem`：

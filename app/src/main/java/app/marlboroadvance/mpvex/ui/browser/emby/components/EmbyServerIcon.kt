@@ -3,7 +3,9 @@ package app.marlboroadvance.mpvex.ui.browser.emby.components
 import android.content.Context
 import androidx.compose.foundation.Image
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -13,6 +15,11 @@ import app.marlboroadvance.mpvex.domain.emby.EmbyHttp
 import app.marlboroadvance.mpvex.domain.emby.EmbyServer
 import app.marlboroadvance.mpvex.domain.emby.EmbyEndpoints
 import app.marlboroadvance.mpvex.domain.emby.EmbyRequestHeaders
+import app.marlboroadvance.mpvex.domain.emby.ReverseProxyRoute
+import app.marlboroadvance.mpvex.domain.emby.playback.LoopbackHttpPool
+import app.marlboroadvance.mpvex.domain.postgres.AppNetworkConfiguration
+import app.marlboroadvance.mpvex.domain.postgres.PlaybackConfigurationRepository
+import app.marlboroadvance.mpvex.domain.postgres.PostgresSourceToken
 import coil3.ImageLoader
 import coil3.compose.rememberAsyncImagePainter
 import coil3.decode.DataSource
@@ -33,10 +40,12 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import okhttp3.Request
+import org.koin.compose.koinInject
 import okio.Buffer
 import okio.FileSystem
 import okio.Path.Companion.toOkioPath
@@ -51,13 +60,37 @@ internal fun EmbyServerIcon(
 ) {
   val context = LocalContext.current
   val fallback = painterResource(R.drawable.ic_emby_server_default)
-  val request = remember(context, sourceKey, iconUrl, server) {
-    try {
-      EmbyServerIconLoader.request(context, sourceKey, iconUrl, server)
-    } catch (e: CancellationException) {
-      throw e
-    } catch (_: Exception) {
-      null
+  val ownership = EmbyServerIconLoader.ownership(iconUrl, server)
+  val configurations = if (ownership == EmbyServerIconLoader.Ownership.LOCAL) null else {
+    koinInject<PlaybackConfigurationRepository>()
+  }
+  val source = configurations?.sourceChanges?.collectAsState()?.value
+  val request by produceState<ImageRequest?>(null, context, sourceKey, iconUrl, server, source) {
+    value = null
+    if (ownership == EmbyServerIconLoader.Ownership.LOCAL) {
+      value = EmbyServerIconLoader.request(context, sourceKey, iconUrl)
+      return@produceState
+    }
+    val configs = configurations ?: return@produceState
+    val token = source ?: return@produceState
+    if (sourceKey != token.sourceKey || (ownership == EmbyServerIconLoader.Ownership.EMBY &&
+        server?.sourceRevision != token.revision)) return@produceState
+    while (true) {
+      value = try {
+        if (ownership == EmbyServerIconLoader.Ownership.EMBY) {
+          val row = server ?: return@produceState
+          val owned = configs.snapshot(row)
+          EmbyServerIconLoader.request(context, sourceKey, iconUrl, row) { configs.validateCurrent(owned) }
+        } else {
+          val app = configs.appNetworkConfiguration(PostgresSourceToken(token.sourceKey, token.revision))
+          EmbyServerIconLoader.request(context, sourceKey, iconUrl, app = app) { configs.validateCurrent(app) }
+        }
+      } catch (e: CancellationException) {
+        throw e
+      } catch (_: Exception) {
+        null
+      }
+      delay(60_000L)
     }
   }
   val painter = if (request == null) fallback else rememberAsyncImagePainter(
@@ -71,16 +104,30 @@ internal fun EmbyServerIcon(
 }
 
 /** Typed Coil data preserves this icon's explicit owning row, never a global selected server. */
-internal class EmbyServerIconData(val value: String, val cacheKey: String, val server: EmbyServer? = null) {
+internal class EmbyServerIconData(
+  val value: String,
+  val cacheKey: String,
+  val server: EmbyServer? = null,
+  val app: AppNetworkConfiguration? = null,
+  val validate: suspend () -> Boolean = { true },
+) {
   override fun toString(): String = "EmbyServerIconData([redacted])"
 }
 
 internal object EmbyServerIconLoader {
+  internal enum class Ownership { LOCAL, EMBY, PUBLIC }
+  internal fun ownership(value: String, server: EmbyServer?): Ownership = when {
+    value.startsWith("data:", ignoreCase = true) -> Ownership.LOCAL
+    server != null && EmbyEndpoints.belongsToServer(server, value) -> Ownership.EMBY
+    else -> Ownership.PUBLIC
+  }
+
   internal const val MAX_IMAGE_BYTES = 2 * 1024 * 1024
   private const val MEMORY_BYTES = 4L * 1024 * 1024
   private const val DISK_BYTES = 16L * 1024 * 1024
   private val gate = Semaphore(4)
   private val client by lazy { EmbyHttp.images.newBuilder().callTimeout(20, TimeUnit.SECONDS).build() }
+  private val publicPool by lazy { LoopbackHttpPool() }
   @Volatile private var instance: ImageLoader? = null
 
   fun get(context: Context): ImageLoader = instance ?: synchronized(this) {
@@ -97,24 +144,45 @@ internal object EmbyServerIconLoader {
       .build().also { instance = it }
   }
 
-  fun request(context: Context, sourceKey: String, value: String, server: EmbyServer? = null): ImageRequest? {
-    if (!isSupportedValue(value)) return null
-    if (server == null && !value.startsWith("data:", ignoreCase = true)) return null
+  fun request(
+    context: Context,
+    sourceKey: String,
+    value: String,
+    server: EmbyServer? = null,
+    app: AppNetworkConfiguration? = null,
+    validate: suspend () -> Boolean = { true },
+  ): ImageRequest? {
+    if (!isSupportedValue(value) || !ownerMatches(sourceKey, server, app)) return null
+    val local = value.startsWith("data:", ignoreCase = true)
     val owner = server?.takeIf { EmbyEndpoints.belongsToServer(it, value) }
-    val routed = owner?.let { EmbyEndpoints.resolve(it, value) } ?: value
-    val key = cacheKey(sourceKey, routed, server)
+    if (!local && owner == null && app == null) return null
+    if (!local && owner == null && app?.reverseRoute?.state == ReverseProxyRoute.State.BLOCKED) return null
+    val routed = owner?.let { EmbyEndpoints.resolve(it, value) } ?: if (local) value else app!!.resolveUrl(value)
+    val key = cacheKey(sourceKey, routed, owner, if (owner == null) app else null)
     // Public/data images have no row tag, including redirects back onto an Emby origin.
     return ImageRequest.Builder(context)
-      .data(EmbyServerIconData(routed, key, owner))
+      .data(EmbyServerIconData(routed, key, owner, if (owner == null) app else null, validate))
       .memoryCacheKey(key).diskCacheKey(key)
-      .memoryCachePolicy(memoryCachePolicy(routed, key))
+      // The custom fetcher validates generation/route before any cache read, including decoded memory.
+      .memoryCachePolicy(CachePolicy.DISABLED)
       .diskCachePolicy(CachePolicy.DISABLED)
       .size(192, 192)
       .build()
   }
 
-  internal fun cacheKey(sourceKey: String, value: String, server: EmbyServer? = null): String =
-    EmbyImageLoader.sha256("row-icon-v2", sourceKey, server?.let { EmbyImageLoader.cacheKey(it, value) }.orEmpty(), value)
+  internal fun ownerMatches(sourceKey: String, server: EmbyServer?, app: AppNetworkConfiguration?): Boolean =
+    (server == null || server.sourceKey == sourceKey) && (app == null || app.source.sourceKey == sourceKey) &&
+      (server == null || app == null || server.sourceRevision == app.source.revision)
+
+  internal fun cacheKey(
+    sourceKey: String,
+    value: String,
+    server: EmbyServer? = null,
+    app: AppNetworkConfiguration? = null,
+  ): String = EmbyImageLoader.sha256(
+    "row-icon-v3", sourceKey, server?.let { EmbyImageLoader.cacheKey(it, value) }.orEmpty(),
+    app?.fingerprint.orEmpty(), value,
+  )
 
   internal fun memoryCachePolicy(value: String, key: String, now: Long = System.currentTimeMillis()): CachePolicy =
     if (value.startsWith("data:", ignoreCase = true) || NetworkImageCachePolicy.memoryFresh(key, now)) {
@@ -160,10 +228,10 @@ internal object EmbyServerIconLoader {
       publicRequest(value)
     }
 
-  internal fun publicRequest(value: String): Request {
+  internal fun publicRequest(value: String, app: AppNetworkConfiguration? = null): Request {
     require(isSupportedValue(value) && !value.startsWith("data:", ignoreCase = true)) { "Unsupported server icon" }
-    // Untagged request: EmbyHttp cannot attach X-Emby-Token or invoke per-server 401 recovery.
-    return Request.Builder().url(value).get().build()
+    // Untagged request: no selected Emby session, 401 recovery or inherited token.
+    return Request.Builder().url(app?.resolveUrl(value) ?: value).get().build()
   }
 
   private val DATA_HEADERS = setOf("png", "jpeg", "jpg", "webp", "gif", "bmp", "x-ms-bmp")
@@ -173,6 +241,7 @@ internal object EmbyServerIconLoader {
     override suspend fun fetch(): FetchResult = withContext(Dispatchers.IO) {
       gate.withPermit {
         currentCoroutineContext().ensureActive()
+        ensureCurrent()
         val cached = readCache()
         val local = data.value.startsWith("data:", ignoreCase = true)
         val bytes = cached ?: if (local) decodeDataImage(data.value) else download()
@@ -184,6 +253,7 @@ internal object EmbyServerIconLoader {
           throw IOException("Unable to load server icon") // Never include a URL, data URI, or cause.
         }
         currentCoroutineContext().ensureActive()
+        ensureCurrent()
         if (cached == null && !local) writeCache(bytes)
         SourceFetchResult(
           source = ImageSource(source = Buffer().write(bytes), fileSystem = FileSystem.SYSTEM, metadata = null),
@@ -229,23 +299,56 @@ internal object EmbyServerIconLoader {
       }
     }
 
-    private fun download(): ByteArray? = runCatching {
-      client.newCall(data.server?.let { iconRequest(data.value, it) } ?: publicRequest(data.value)).execute().use { response ->
-        if (!response.isSuccessful) return@use null
-        val body = response.body
-        if (body.contentLength() > MAX_IMAGE_BYTES) return@use null
-        body.source().use sourceRead@{ source ->
-          val buffer = Buffer()
-          while (buffer.size <= MAX_IMAGE_BYTES) {
-            val count = source.read(buffer, minOf(8192L, MAX_IMAGE_BYTES + 1L - buffer.size))
-            if (count == -1L) return@sourceRead buffer.readByteArray().takeIf(::isRaster)
-          }
-          null
+    private suspend fun ensureCurrent() {
+      if (!data.validate()) throw IOException("Server icon source changed")
+    }
+
+    private suspend fun download(): ByteArray? = try {
+      data.server?.let { row ->
+        ensureCurrent()
+        client.newCall(iconRequest(data.value, row)).execute().use { response ->
+          ensureCurrent()
+          if (response.isSuccessful) readImage(response.body) else null
         }
-      }
-    }.getOrElse { error ->
+      } ?: downloadPublic()
+    } catch (error: Exception) {
       if (error is CancellationException) throw error
       null
+    }
+
+    private suspend fun downloadPublic(): ByteArray? {
+      val app = data.app ?: return null
+      var url = app.resolveUrl(data.value)
+      repeat(6) { hop ->
+        ensureCurrent()
+        publicPool.execute(
+          url = url, kind = LoopbackHttpPool.Kind.IMAGE, retry = false,
+          dangerAcceptInvalidCerts = app.dangerAcceptInvalidCertificates,
+          redirectPolicy = LoopbackHttpPool.RedirectPolicy.NONE,
+        ).use { response ->
+          ensureCurrent()
+          if (response.code !in setOf(301, 302, 303, 307, 308)) {
+            return if (response.isSuccessful) readImage(response.body) else null
+          }
+          val location = response.header("Location") ?: return null
+          if (hop == 5) return null
+          // Resolve against the original public URL and rewrite Location through the same app route.
+          url = app.resolveRedirect(url, location)
+        }
+      }
+      return null
+    }
+
+    private fun readImage(body: okhttp3.ResponseBody): ByteArray? {
+      if (body.contentLength() > MAX_IMAGE_BYTES) return null
+      return body.source().use { source ->
+        val buffer = Buffer()
+        while (buffer.size <= MAX_IMAGE_BYTES) {
+          val count = source.read(buffer, minOf(8192L, MAX_IMAGE_BYTES + 1L - buffer.size))
+          if (count == -1L) return@use buffer.readByteArray().takeIf(::isRaster)
+        }
+        null
+      }
     }
 
     class Factory : Fetcher.Factory<EmbyServerIconData> {

@@ -56,14 +56,14 @@ fun Modifier.cineHazeSource(state: HazeState?): Modifier =
 /**
  * Cine 的玻璃层：**真背景模糊 + 投影 + 顶边高光**。
  *
- * ## 为什么三样缺一不可（这一条是 v132 的核心修正）
+ * ## 为什么三样缺一不可
  * 设计稿的玻璃是：
  * ```css
  * background: var(--glass);
  * backdrop-filter: blur(22px) saturate(1.5);
  * box-shadow: 0 14px 34px rgba(0,0,0,.42), 0 1px 0 rgba(255,255,255,.05) inset;
  * ```
- * v126~v131 只实现了第一行（半透明色）+ 1dp 描边，于是「玻璃」退化成一条色带：
+ * 只有半透明色与描边不足以呈现玻璃材质：
  * - 没有 `backdrop-filter` ⇒ 底下内容不糊，看起来只是半透明，不像材质；
  * - 没有 `box-shadow` ⇒ 浮层和内容贴在同一层，没有高度；
  * - 没有内高光 ⇒ 少一层边缘反光，质感偏平。

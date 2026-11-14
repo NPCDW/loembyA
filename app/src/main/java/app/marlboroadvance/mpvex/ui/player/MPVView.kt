@@ -44,11 +44,19 @@ private const val MPV_HWDEC_CODECS = "h264,hevc,mpeg2video,vc1,vp8,vp9,av1"
  */
 internal const val LAVF_STREAM_OPTS = "reconnect=1,reconnect_streamed=1,reconnect_delay_max=20"
 
+/** Supported numeric mpv cache-secs default; byte budgets govern ordinary Emby streaming windows. */
+internal const val MPV_CACHE_TIME_HORIZON_SECONDS = "1000000"
+
 class MPVView(
   context: Context,
   attributes: AttributeSet,
 ) : BaseMPVView(context, attributes),
   KoinComponent {
+  private fun configureCacheOption(name: String, value: String) {
+    val status = MPVLib.setOptionString(name, value)
+    if (status < 0) Log.w(TAG, "mpv cache option rejected name=$name status=$status")
+  }
+
   private val audioPreferences: AudioPreferences by inject()
   private val playerPreferences: PlayerPreferences by inject()
   private val decoderPreferences: DecoderPreferences by inject()
@@ -192,78 +200,37 @@ class MPVView(
       MPVLib.setOptionString("vf", "format=yuv420p")
     }
     
-    // ── demuxer 内存缓冲（v196 起按设备分档加深）──
-    // ⚠️ **字节上限才是这里真正的闸门**（秒数只是另一个上限，谁先到算谁）。
-    // `demuxer-max-bytes` 一旦被打满，demux 线程会停下来等消费者；反过来，
-    // 池子太浅时任何一次供给波动（WiFi 深衰落两三秒很常见）就会把池子抽干
-    // ⇒ 反复 rebuffer，「放两三秒卡一下」。
-    //
-    // 真机证据链（v194~v195）：同一条 2160×3840@60 / 27.7Mbps 的片子，
-    // media3（ExoPlayer）流畅、mpv 卡 —— 直出生效后两边都是 MediaCodec 零拷贝，
-    // 解码与输出路径已对齐，剩下的最大差异就是**缓冲深度**：
-    // ExoPlayer 默认 50 秒内存池（DEFAULT_MAX_BUFFER_MS=50000，纯内存不落盘），
-    // 这边原先只有 64MB / 8 秒 —— 27.7Mbps 下 8 秒 ≈ 27.7MB，池子永远贴地飞行。
-    // 192MB ≈ 55 秒（27.7Mbps）／24 秒（8MB/s 的原盘），这才与 media3 站在同一起跑线。
-    //
-    // 低内存设备（isLowRamDevice）维持旧值：192MB 的 demux 缓冲对它们是灾难。
-    val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
-    val lowRamDevice = activityManager.isLowRamDevice
-    val cacheMegs = if (lowRamDevice) 64 else 192
-    val cacheSecs = if (lowRamDevice) "8" else "45"
-    MPVLib.setOptionString("demuxer-max-bytes", "${cacheMegs * 1024 * 1024}")
-    // 回退缓冲（seek 之后回看用）不跟着翻倍：64MB 足够，省下的内存留给正向预读。
-    MPVLib.setOptionString("demuxer-max-back-bytes", "${64 * 1024 * 1024}")
-    // ⭐ v217：让**已缓存的回看区间可寻址**。不开的话，往回拖进度条哪怕只回退
-    // 几十秒、数据明明还在内存里，mpv 也要走一遍「丢缓存 → HTTP Range 重连 →
-    // 重新定位」—— 拖回去比拖往前还慢就是这个原因。开了之后落在缓存区间内的
-    // seek 是纯内存操作，网络流上肉眼可见地「秒落」。
-    MPVLib.setOptionString("demuxer-seekable-cache", "yes")
-
-    // ── 远程流（Emby 直连、strm 指向的远端地址…）的缓冲与重连 ──
-    // 这些片子的瓶颈通常在「取数据」而不是「解码」：源是远端 AVI 时，
-    // AVI 的索引在文件尾部，播放器要反复回头读；一旦中间那层（Emby 中转、远端服务器）
-    // 抖动或断一下，画面就卡住甚至再也不动 —— 观感上就是「软解卡得动不了」。
-    // 所以把预读和重连都拉起来：抖动能自愈，不要一路卡到用户重进页面。
-    // ⚠️ **单位是「秒」，但真正的上限是上面那个字节闸门**（谁先到算谁）。
-    // 45 秒在 27.7Mbps 下 ≈ 155MB（< 192MB 闸门，秒数先到）；在 8MB/s 的
-    // 4K 原盘上 45 秒 ≈ 360MB（> 闸门，字节先到，实际停在 ~24 秒）。
-    // 无论哪种，都比旧的 8 秒 / 64MB 深一个量级 —— 波动被池子平均掉，
-    // 而不是直接打穿到播放头上。readahead 拉满同一口径，让 mpv 尽快把池子填满。
-    MPVLib.setOptionString("cache-secs", cacheSecs)
-    MPVLib.setOptionString("demuxer-readahead-secs", cacheSecs)
-    // 起播前先攒一小段（ExoPlayer 的 bufferForPlayback 同款思路）：
-    // 旧行为是「来一点就播」，起播瞬间池子是空的，等于贴地起飞 —— 首段网络
-    // 一抖就是「放两三秒就卡住」。攒 4 秒再播，起播慢这么一下，换来后面稳定。
-    // ⚠️ 只敢开 4 秒：连播切集每集都要多等这么多，再长切集就明显拖沓了。
-    // （注意这不是上面注释掉 `cache-pause` 的那个坑 —— 那是「缓冲中永久暂停」的死局，
-    // 这个只是起播门槛，且前提是服务器可断流续拉；不可续拉的源 mpv 自己会忽略。）
-    MPVLib.setOptionString("cache-pause-initial", "yes")
-    MPVLib.setOptionString("cache-pause-wait", "4")
+    // loemby starts with 300/200 MiB; the coordinator replaces these with the selected source's
+    // bitrate-derived byte budgets. Do not impose an independent 8/45-second streaming window.
+    configureCacheOption("cache", "yes")
+    configureCacheOption("demuxer-max-bytes", (300L * 1024 * 1024).toString())
+    configureCacheOption("demuxer-max-back-bytes", (200L * 1024 * 1024).toString())
+    configureCacheOption("demuxer-seekable-cache", "yes")
+    // Both option names are present in every bundled libmpv. Use mpv's numeric cache-secs default
+    // rather than assuming that an "unlimited" choice belongs to either option's native parser.
+    // This finite horizon is practically byte-controlled, not a promise of unlimited/offline storage.
+    configureCacheOption("cache-secs", MPV_CACHE_TIME_HORIZON_SECONDS)
+    configureCacheOption("demuxer-readahead-secs", MPV_CACHE_TIME_HORIZON_SECONDS)
+    // A four-second initial buffering threshold smooths start-up without adding a long queue-entry
+    // delay. This threshold is independent of the byte-governed streaming windows above.
+    configureCacheOption("cache-pause-initial", "yes")
+    configureCacheOption("cache-pause-wait", "4")
     // 单次网络读取的缓冲区（默认仅 128KiB，高延迟链路上吞吐会很难看）
     MPVLib.setOptionString("stream-buffer-size", "4MiB")
     MPVLib.setOptionString("network-timeout", "30")
     // lavf 的 HTTP 重连：中途断了接着拉，而不是直接判死
     MPVLib.setOptionString("stream-lavf-o", LAVF_STREAM_OPTS)
 
-    // ── 落盘缓存（清单 #18）──
-    // 上面那几项是**内存**缓冲：进程活着就有，退出就没了 ⇒ 同一片子第二次看
-    // 仍然要从服务器重拉。这里补上落盘那一半。
-    // 三条硬约束（少一条就是「开着但没效果」，而且 mpv **不报错**）：
-    //  · `cache-dir` 必须是**绝对路径**，相对路径会被静默忽略；
-    //  · 目录得**自己先建**，mpv 不会替我们 mkdirs；
-    //  · `cache-persize` 是**每条流**的上限，跟内存那侧（`demuxer-max-bytes`）
-    //    彼此独立 —— 调大它不会让内存缓冲变大。
+    // The bundled demuxer supports temporary disk buffering, not cache-dir/cache-persize or
+    // persistent URL-indexed replay. Byte budgets above still bound the seekable streaming windows;
+    // there is no separately verified per-stream disk-size option or offline/download entry point.
+    configureCacheOption("cache-on-disk", "no")
     if (playerPreferences.diskCacheEnabled.get()) {
       val dir = MpvDiskCache.ensureDir(context)
       if (dir != null) {
-        val limitMb = playerPreferences.diskCacheSizeMb.get()
-          .coerceIn(MpvDiskCache.MIN_SIZE_MB, MpvDiskCache.MAX_SIZE_MB)
-        MPVLib.setOptionString("cache", "yes")
-        MPVLib.setOptionString("cache-dir", dir.absolutePath)
-        MPVLib.setOptionString("cache-persize", "${limitMb}M")
-        // ⚠️ 故意**不**开 `cache-pause`：开了之后一旦服务器不支持 Range 请求
-        // （部分网盘直链、某些 SFTP/FTP 源），mpv 会误判成「缓冲完了」而**永久暂停**，
-        // 表现是画面停在缓冲动画上再也不动。宁可卡一下，也不要这种死局。
+        configureCacheOption("demuxer-cache-dir", dir.absolutePath)
+        configureCacheOption("demuxer-cache-unlink-files", "yes")
+        configureCacheOption("cache-on-disk", "yes")
       }
     }
     
@@ -292,8 +259,7 @@ class MPVView(
     // ① `vd-lavc-dr=yes`（direct rendering）：解码器直接把输出写进 GPU 可读的缓冲，
     //    少一次整帧拷贝。4K 一帧（YUV420 10bit）约 25MB，这一拷在低端 SoC 上是
     //    实实在在的十几毫秒 —— 掉帧就是这么来的。
-    //    ⚠️ 它原本被误写在 `applyAnime4KShaders()` 里（只有开着 Anime4K 才生效），
-    //    于是「不开着色器 ⇒ 每条片子都少一层优化」。挪到这里对所有播放生效。
+    //    Direct rendering is a general decoder optimization, independent of Anime4K.
     MPVLib.setOptionString("vd-lavc-dr", "yes")
     // ② `vd-lavc-film-grain`：ffmpeg 的胶片颗粒合成策略。
     //    `cpu` 让**每一帧**都在 CPU 上做一遍颗粒合成 —— 在 1080p 上几乎无感，
@@ -305,9 +271,7 @@ class MPVView(
     //    copyback 硬解每帧都要把整帧重新上传成纹理，同步的 glTexSubImage2D 会让渲染线程
     //    在驱动里等 DMA 完成；PBO 把它变成「先塞进缓冲、下一帧再取」，4K 高帧率下能削掉
     //    一大截周期性停顿。`opengl-early-flush=no` 配套：别每帧强制 flush，让驱动自己攒批。
-    //    ⚠️ 这两项原先只写在 `applyAnime4KShaders()` 里 —— 也就是**不开 Anime4K 就白丢**，
-    //    与 `vd-lavc-dr` 当初被埋在那儿是同一个毛病。挪到通用段，全场生效。
-    //    Vulkan 后端不吃这两项，开了 Vulkan 就别设。
+    //    These OpenGL optimizations are independent of Anime4K. Vulkan does not use them.
     if (!decoderPreferences.useVulkan.get()) {
       MPVLib.setOptionString("opengl-pbo", "yes")
       MPVLib.setOptionString("opengl-early-flush", "no")
@@ -339,13 +303,7 @@ class MPVView(
       Debanding.GPU -> MPVLib.setOptionString("deband", "yes")
     }
 
-    // 这里原来有一段「按 `enabledStatisticsPage` 偏好自动弹出 mpv 统计浮层」的代码，
-    // 已在清单 #19 移除。移除原因不是「统计没用」，而是**它变成了没有入口的功能**：
-    // 设置页那六个 chip（关闭 + 第 1~5 页）被整块删掉之后，唯一还能让它出现的方式
-    // 就是本地偏好里残留着旧值 —— 也就是「升级后凭空弹一个用户不知道怎么关掉的浮层」。
-    // 想要统计浮层的人：写进自己的 `mpv.conf`
-    // （`script-binding stats/display-stats-toggle`），本项目不拦配置。
-    // 对应的 [EngineFeature.STATS] 枚举项也已一并删除（它本来就零读点）。
+    // The app does not auto-open native statistics; user mpv.conf bindings remain supported.
   }
 
   @Suppress("ReturnCount", "DEPRECATION")
@@ -389,6 +347,8 @@ class MPVView(
     mapOf(
       "pause" to MPVLib.MpvFormat.MPV_FORMAT_FLAG,
       "paused-for-cache" to MPVLib.MpvFormat.MPV_FORMAT_FLAG,
+      "cache-buffering-state" to MPVLib.MpvFormat.MPV_FORMAT_INT64,
+      "seeking" to MPVLib.MpvFormat.MPV_FORMAT_FLAG,
       "video-params/aspect" to MPVLib.MpvFormat.MPV_FORMAT_DOUBLE,
       "video-params/w" to MPVLib.MpvFormat.MPV_FORMAT_INT64,
       "video-params/h" to MPVLib.MpvFormat.MPV_FORMAT_INT64,
@@ -514,14 +474,9 @@ class MPVView(
   }
 
 
-/**
-   * 在 initOptions 阶段挂上 Anime4K shader。
-   *
-   * ⚠️ 这里**只读**已备好的文件，不再做任何拷贝（清单 #20 必修 2）。
-   * 原来这里调 [Anime4KManager.initialize]，它会`assets.list()` + 逐个
-   * `assets.open()` 几十个 .glsl —— 而本方法跑在主线程（mpv 初始化必须在主线程）。
-   * 现在 IO 那一半由 [prepareAnime4KOnIoThread] 在 IO 线程提前做完，
-   * 本方法只负责「把链路字符串写进 mpv 选项」。
+  /**
+   * Attach the pre-prepared Anime4K shader chain during native initialization on Main.
+   * Asset copying belongs to [prepareAnime4KOnIoThread], not this synchronous initialization path.
    */
   fun applyAnime4KShaders() {
     // 直出模式用的是 mediacodec_embed，没有 GL/libplacebo 渲染器：`glsl-shaders` 无处生效，
@@ -550,8 +505,7 @@ class MPVView(
         MPVLib.setOptionString("opengl-pbo", "yes")
         MPVLib.setOptionString("opengl-early-flush", "no")
       }
-      // 注：`vd-lavc-dr` 不在这里设 —— 它对所有播放都有益，已挪到 initOptions 的
-      // 「解码器侧通用提速」段（原来放在这里导致「不开 Anime4K 就没这层优化」）。
+      // vd-lavc-dr is initialized for all playback above, independently of this shader chain.
 
       // Apply shaders (MUST use setOptionString in initOptions!)
       MPVLib.setOptionString("glsl-shaders", shaderChain)
@@ -561,7 +515,7 @@ class MPVView(
   }
 
   /**
-   * 在 IO 线程把 Anime4K 的 shader 从 assets 备到内部存储（清单 #20 必修 2）。
+   * 在 IO 线程把 Anime4K 的 shader 从 assets 备到内部存储。
    *
    * 必须在 [initialize] 之前调 —— `glsl-shaders` 是 `setOptionString`，
    * 过了初始化期再设就不生效了。

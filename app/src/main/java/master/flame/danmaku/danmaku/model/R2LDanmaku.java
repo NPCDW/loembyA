@@ -45,7 +45,7 @@ public class R2LDanmaku extends BaseDanmaku {
         if (mTimer != null) {
             long currMS = mTimer.currMillisecond;
             long deltaDuration = currMS - getActualTime();
-            // CineIsle v115：可见期判据改用 getLifetime()（不吃速度系数）；
+            // 可见期使用 getLifetime()，不受速度系数影响；
             // 滚动速度仍由 measure() 的 mStepX（基于 duration.value）决定，二者解耦。
             if (deltaDuration > 0 && deltaDuration < duration.getLifetime()) {
                 this.x = getAccurateLeft(displayer, currMS);
@@ -63,7 +63,7 @@ public class R2LDanmaku extends BaseDanmaku {
 
     protected float getAccurateLeft(IDisplayer displayer, long currTime) {
         long elapsedTime = currTime - getActualTime();
-        // CineIsle v115：寿终判定改用 getLifetime()。
+        // 寿终判定使用独立于速度的 getLifetime()。
         if (elapsedTime >= duration.getLifetime()) {
             return -paintWidth;
         }

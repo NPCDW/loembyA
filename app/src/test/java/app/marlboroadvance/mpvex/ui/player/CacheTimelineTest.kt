@@ -88,7 +88,7 @@ class CacheTimelineTest {
   }
 
   @Test
-  fun `bof and eof extend the outer ranges after sorting`() {
+  fun `bof and premature eof flags do not invent large cached boundary ranges`() {
     val timeline = timeline(
       duration = 100.0,
       bofCached = true,
@@ -97,21 +97,24 @@ class CacheTimelineTest {
     )
 
     assertEquals(
-      listOf(range(0.0, 20.0), range(40.0, 50.0), range(70.0, 100.0)),
+      listOf(range(10.0, 20.0), range(40.0, 50.0), range(70.0, 90.0)),
       timeline.cachedRanges,
     )
-    assertEquals(listOf(range(20.0, 40.0), range(50.0, 70.0)), timeline.uncachedRanges)
+    assertEquals(
+      listOf(range(0.0, 10.0), range(20.0, 40.0), range(50.0, 70.0), range(90.0, 100.0)),
+      timeline.uncachedRanges,
+    )
     assertTrue(timeline.bofCached)
     assertTrue(timeline.eofCached)
   }
 
   @Test
-  fun `boundary extension can close a small gap and merge ranges`() {
+  fun `bof and eof snap only small timestamp gaps at actual boundaries`() {
     val timeline = timeline(
       duration = 20.0,
       bofCached = true,
       eofCached = true,
-      ranges = listOf(0.0 to 9.0, 9.5 to 18.0),
+      ranges = listOf(0.5 to 9.0, 9.5 to 19.5),
     )
 
     assertEquals(listOf(range(0.0, 20.0)), timeline.cachedRanges)
@@ -130,7 +133,7 @@ class CacheTimelineTest {
         ranges = listOf(20.0 to 30.0, 100.0 to 150.0),
       )
       assertEquals(null, timeline.durationSeconds)
-      assertEquals(listOf(range(0.0, 30.0), range(100.0, 150.0)), timeline.cachedRanges)
+      assertEquals(listOf(range(20.0, 30.0), range(100.0, 150.0)), timeline.cachedRanges)
       assertTrue(timeline.uncachedRanges.isEmpty())
       assertTrue(timeline.eofCached)
     }
@@ -162,6 +165,26 @@ class CacheTimelineTest {
     assertEquals(listOf(range(0.0, 30.0)), timeline.uncachedRanges)
     assertTrue(timeline.bofCached)
     assertTrue(timeline.eofCached)
+  }
+
+  @Test
+  fun `premature eof keeps uncached remainder even with one seekable range`() {
+    val snapshot = timeline(
+      duration = 7200.0,
+      bofCached = true,
+      eofCached = true,
+      ranges = listOf(1000.0 to 1025.0),
+    )
+    assertEquals(listOf(range(1000.0, 1025.0)), snapshot.cachedRanges)
+    assertEquals(listOf(range(0.0, 1000.0), range(1025.0, 7200.0)), snapshot.uncachedRanges)
+  }
+
+  @Test
+  fun `new snapshot never retains evicted seekable ranges`() {
+    timeline(duration = 100.0, ranges = listOf(0.0 to 30.0, 50.0 to 70.0))
+    val now = timeline(duration = 100.0, ranges = listOf(60.0 to 80.0))
+    assertEquals(listOf(range(60.0, 80.0)), now.cachedRanges)
+    assertEquals(listOf(range(0.0, 60.0), range(80.0, 100.0)), now.uncachedRanges)
   }
 
   private fun timeline(

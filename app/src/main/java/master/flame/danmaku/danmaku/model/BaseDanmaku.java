@@ -263,10 +263,7 @@ public abstract class BaseDanmaku {
     }
 
     public boolean isTimeOut(long ctime) {
-        // CineIsle v115：寿命改用 getLifetime()（不吃滚动速度系数 factor）。
-        // 原库直接用 duration.value，而 value = mInitialDuration × factor，
-        // 用户把速度调慢（factor 变大）会顺带把寿命拉长、调快则缩短 ——
-        // 这正是「有的弹幕消失快有的慢」与「拉慢速度寿命还是短」的根源之一。
+        // 寿命只认初始时长，不受 duration.value 中滚动速度系数 factor 的影响。
         return ctime - getActualTime() >= duration.getLifetime();
     }
 
@@ -275,7 +272,7 @@ public abstract class BaseDanmaku {
     }
 
     public boolean isOutside(long ctime) {
-        // CineIsle v115：同上，出界判定同样只认寿命。
+        // 出界判定同样只认寿命。
         long dtime = ctime - getActualTime();
         return dtime <= 0 || dtime >= duration.getLifetime();
     }

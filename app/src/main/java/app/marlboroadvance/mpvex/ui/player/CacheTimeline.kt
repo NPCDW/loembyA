@@ -77,8 +77,12 @@ internal data class CacheTimeline(
 
       val sorted = ranges.sortedWith(compareBy(CacheTimeRange::startSeconds, CacheTimeRange::endSeconds))
         .toMutableList()
-      if (bofCached) sorted[0] = sorted.first().copy(startSeconds = 0.0)
-      if (eofCached && duration != null) {
+      // These flags describe demuxer boundaries, not proof of every timestamp between a range and
+      // the media edges. Premature EOF and seeking must not paint minutes of absent data as cached.
+      if (bofCached && sorted.first().startSeconds <= MERGE_GAP_SECONDS) {
+        sorted[0] = sorted.first().copy(startSeconds = 0.0)
+      }
+      if (eofCached && duration != null && duration - sorted.last().endSeconds <= MERGE_GAP_SECONDS) {
         sorted[sorted.lastIndex] = sorted.last().copy(endSeconds = duration)
       }
 

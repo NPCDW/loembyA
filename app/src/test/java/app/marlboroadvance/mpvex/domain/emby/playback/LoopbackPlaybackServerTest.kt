@@ -6,7 +6,9 @@ import app.marlboroadvance.mpvex.domain.postgres.playbackConfigurationForTest
 import com.github.luben.zstd.Zstd
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
@@ -188,6 +190,38 @@ ${f.origin}/absolute.ts\r
       assertFalse(f.local.subtitleCache.fileForUrl(f.origin + "/failed").exists())
       assertFalse(f.directory.walk().any { it.name.endsWith(".tmp") })
       f.local.subtitleCache.clear(); assertFalse(f.local.subtitleCache.fileForUrl(upstream).exists())
+    }
+  }
+
+  @Test fun failedOptionalSubtitlePrefetchDoesNotNotifyButMediaFailureStillDoes() = runBlocking {
+    Fixture().use { f ->
+      val errors = java.util.concurrent.CopyOnWriteArrayList<LoopbackPlaybackServer.PlaybackNetworkError>()
+      val collector = launch(start = CoroutineStart.UNDISPATCHED) { f.local.errors.collect { errors += it } }
+      try {
+        f.payload = """{"PlaySessionId":"s","MediaSources":[{"Id":"media","Container":"mkv",
+          "DirectStreamUrl":"/video","MediaStreams":[{"Index":4,"Type":"Subtitle",
+          "IsExternal":true,"Codec":"ass"}]}]}"""
+        f.upstream.createContext("/emby/Videos/item/media/Subtitles/4/Stream.ass", exchange(503))
+        f.upstream.createContext("/emby/video", exchange(200, "playing".toByteArray()))
+        f.upstream.createContext("/media-failure", exchange(503))
+        val play = f.local.register(PlaybackSpec(f.server, "item"))
+        val result = f.local.resolvedForUrl(play)
+        val subtitle = f.origin + "/emby/Videos/item/media/Subtitles/4/Stream.ass"
+        // Join the identical single-flight cache job launched during preparation.
+        f.local.subtitleCache.precache(f.local.scope, f.server, subtitle)?.join()
+        get(result.videoUrl).use { assertEquals(200, it.code); assertEquals("playing", it.body.string()) }
+        delay(50)
+        assertTrue(errors.isEmpty())
+        assertFalse(f.local.subtitleCache.fileForUrl(subtitle).exists())
+        val failedMedia = f.local.registerStream(f.server, f.origin + "/media-failure", "video")
+        get(failedMedia).use { assertEquals(503, it.code) }
+        withTimeout(3000) { while (errors.isEmpty()) delay(10) }
+        assertEquals(503, errors.single().status)
+        assertTrue(errors.single().message.startsWith("媒体流响应错误"))
+      } finally {
+        collector.cancel()
+        collector.join()
+      }
     }
   }
 

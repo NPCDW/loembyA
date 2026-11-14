@@ -95,8 +95,7 @@ fun CineDock(
       modifier = Modifier
         .fillMaxWidth()
         .height(space.dockHeight)
-        // 真模糊 + 14dp 投影（设计稿 .dock 的 box-shadow）。v131 之前只有半透明色，
-        // 所以「玻璃」看起来只是一条色带 —— 这一条是 v132 观感修正的核心
+        // 背景模糊与 14dp 投影共同形成浮层，半透明色本身不足以呈现玻璃材质。
         .cineGlass(shape = capsule, elevation = 14.dp, blurRadius = 22.dp)
         .padding(horizontal = 10.dp),
       verticalAlignment = Alignment.CenterVertically,
@@ -151,7 +150,7 @@ private fun DockItem(
         Spacer(Modifier.width(7.dp))
         Text(
           text = label,
-          // 设计稿 .dlabel 是 13px/600（v131 用的 12.5，比设计稿小半档）
+          // 设计稿 .dlabel 是 13px/600。
           style = type.cardMeta.copy(fontSize = 13.sp, fontWeight = FontWeight.W600),
           color = colors.onChipSelected,
           maxLines = 1,

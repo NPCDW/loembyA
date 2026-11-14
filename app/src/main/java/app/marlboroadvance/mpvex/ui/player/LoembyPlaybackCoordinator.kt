@@ -97,6 +97,9 @@ class LoembyPlaybackCoordinator internal constructor(
 
   private val mutableActive = MutableStateFlow<LoembyPlaybackState?>(null)
   val active: StateFlow<LoembyPlaybackState?> = mutableActive
+  private val mutableLoaded = MutableStateFlow<PlaybackSpec?>(null)
+  // Keep the last native-confirmed entry when active clears on exit or between queue entries.
+  val loaded: StateFlow<PlaybackSpec?> = mutableLoaded
   private var current: Session? = null
   private var generation = 0L
   private var lastSettlement: Job? = null
@@ -155,6 +158,7 @@ class LoembyPlaybackCoordinator internal constructor(
       val session = Session(++generation, owner, transport, callbacks, LoembyPlaybackState(url, spec))
       session.precedingSettlement = previous?.settlement ?: lastSettlement
       current = session
+      if (spec.detailOrigin == null || mutableLoaded.value?.detailOrigin !== spec.detailOrigin) mutableLoaded.value = null
       backend.volume()?.let { transport.setDouble("volume", it) }
       publish(session)
       // Resolving here and the HTTP route share a single-flight cache. It cannot create another core.
@@ -191,6 +195,7 @@ class LoembyPlaybackCoordinator internal constructor(
     }
     if (session.loaded) return
     session.loaded = true
+    mutableLoaded.value = session.state.spec
     session.startedAt = clock()
     session.lastSave = clock()
     session.initializing = scope.launch {
@@ -418,8 +423,15 @@ class LoembyPlaybackCoordinator internal constructor(
 
   private fun configureCache(session: Session, resolved: ResolvedPlayback) {
     if (!owns(session)) return
-    session.transport.setString("demuxer-max-bytes", resolved.config.cache.forward.bytesFor(resolved.source.Bitrate).toString())
-    session.transport.setString("demuxer-max-back-bytes", resolved.config.cache.backward.bytesFor(resolved.source.Bitrate).toString())
+    val bitrate = resolved.source.Bitrate
+    val forwardBytes = resolved.config.cache.forward.bytesFor(bitrate)
+    val backwardBytes = resolved.config.cache.backward.bytesFor(bitrate)
+    session.transport.setString("demuxer-max-bytes", forwardBytes.toString())
+    session.transport.setString("demuxer-max-back-bytes", backwardBytes.toString())
+    // Reassert on source/version changes so a prior native profile cannot restore a short time cap.
+    session.transport.setString("cache-secs", MPV_CACHE_TIME_HORIZON_SECONDS)
+    session.transport.setString("demuxer-readahead-secs", MPV_CACHE_TIME_HORIZON_SECONDS)
+    runCatching { PlayerDiagLog.log("cache-budget", cacheBudgetDiagnostic(forwardBytes, backwardBytes, bitrate)) }
   }
 
   private fun beginPolling(session: Session) {
@@ -431,15 +443,31 @@ class LoembyPlaybackCoordinator internal constructor(
         session.transport.getDouble("volume")?.takeIf { it.isFinite() && it >= 0 }?.let(backend::saveVolume)
         if (clock() - session.lastSave >= 30_000) {
           session.lastSave = clock()
+          logCacheSnapshot(session)
           val ticks = positionTicks(session.position)
           scope.launch {
             session.reports.withLock {
               if (!owns(session)) return@withLock
-              runEffect(session, "Emby 播放进度上报失败") { backend.report(session.resolved!!, "progress", ticks) }
+              runProgressReport { backend.report(session.resolved!!, "progress", ticks) }
             }
           }
         }
       }
+    }
+  }
+
+  private fun logCacheSnapshot(session: Session) {
+    runCatching {
+      val timeline = CacheTimeline.fromMpv(session.transport.getNode("demuxer-cache-state"), session.duration)
+      val ranges = timeline.cachedRanges.take(8).joinToString(",") {
+        "${roundedSeconds(it.startSeconds)}-${roundedSeconds(it.endSeconds)}"
+      }
+      PlayerDiagLog.log(
+        "cache-state",
+        "positionSeconds=${session.position} durationSeconds=${timeline.durationSeconds ?: 0.0} " +
+          "rangeCount=${timeline.cachedRanges.size} rangesSeconds=[$ranges] " +
+          "bofCached=${timeline.bofCached} eofCached=${timeline.eofCached}",
+      )
     }
   }
 
@@ -559,6 +587,17 @@ class LoembyPlaybackCoordinator internal constructor(
     false
   }
 
+  /** Only periodic Emby progress reporting is log-only; start/stop and fatal policy stay separate. */
+  private suspend fun runProgressReport(block: suspend () -> Unit) {
+    try {
+      block()
+    } catch (cancelled: CancellationException) {
+      throw cancelled
+    } catch (failure: Exception) {
+      EmbyLog.warn("播放后台操作失败 operation=progress-report error=${failure.javaClass.simpleName}")
+    }
+  }
+
   private suspend fun runEffect(session: Session, failure: String, block: suspend () -> Unit) {
     try { block() }
     catch (cancelled: CancellationException) { throw cancelled }
@@ -578,6 +617,18 @@ class LoembyPlaybackCoordinator internal constructor(
   }
 
   companion object {
+    internal fun cacheBudgetDiagnostic(forwardBytes: Long, backwardBytes: Long, bitrate: Long?): String {
+      val validBitrate = bitrate?.takeIf { it > 0 }
+      fun estimatedSeconds(bytes: Long): String = validBitrate?.let {
+        BigDecimal.valueOf(bytes).multiply(BigDecimal.valueOf(8L))
+          .divide(BigDecimal.valueOf(it), 1, RoundingMode.HALF_UP).toPlainString()
+      } ?: "unknown"
+      return "forwardBytes=$forwardBytes backwardBytes=$backwardBytes bitrateBps=${validBitrate ?: "unknown"} " +
+        "estimatedForwardSeconds=${estimatedSeconds(forwardBytes)} " +
+        "estimatedBackwardSeconds=${estimatedSeconds(backwardBytes)} " +
+        "timeHorizonSeconds=$MPV_CACHE_TIME_HORIZON_SECONDS"
+    }
+
     internal fun fallbackItem(spec: PlaybackSpec): EmbyItem = EmbyItem(
       Id = spec.itemId,
       Name = spec.itemName.ifBlank { spec.title },

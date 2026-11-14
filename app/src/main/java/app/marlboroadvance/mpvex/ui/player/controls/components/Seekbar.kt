@@ -43,10 +43,12 @@ import app.marlboroadvance.mpvex.ui.player.controls.LocalPlayerButtonsClickEvent
 import app.marlboroadvance.mpvex.ui.theme.spacing
 import `is`.xyz.mpv.Utils
 
-/** Cache classification is independent of the playback position; the thumb alone marks progress. */
+/** Played means before the current playhead, not accumulated playback history. */
 internal enum class TimelineIntervalKind {
-  Cached,
-  Uncached,
+  PlayedCached,
+  PlayedUncached,
+  UnplayedCached,
+  UnplayedUncached,
 }
 
 internal data class TimelineClassifiedInterval(
@@ -56,29 +58,63 @@ internal data class TimelineClassifiedInterval(
 )
 
 internal data class TimelineColorPalette<T>(
-  val cached: T,
-  val uncached: T,
+  val playedCached: T,
+  val playedUncached: T,
+  val unplayedCached: T,
+  val unplayedUncached: T,
 )
 
 internal fun <T> TimelineColorPalette<T>.colorFor(kind: TimelineIntervalKind): T = when (kind) {
-  TimelineIntervalKind.Cached -> cached
-  TimelineIntervalKind.Uncached -> uncached
+  TimelineIntervalKind.PlayedCached -> playedCached
+  TimelineIntervalKind.PlayedUncached -> playedUncached
+  TimelineIntervalKind.UnplayedCached -> unplayedCached
+  TimelineIntervalKind.UnplayedUncached -> unplayedUncached
 }
 
 internal fun classifyTimelineIntervals(
   timeline: CacheTimeline,
   durationSeconds: Double,
+  positionSeconds: Double,
 ): List<TimelineClassifiedInterval> {
   if (!durationSeconds.isFinite() || durationSeconds <= 0.0) return emptyList()
+  val position = if (positionSeconds.isFinite()) positionSeconds.coerceIn(0.0, durationSeconds) else 0.0
+  // Derive the complement against today's duration, not a possibly stale snapshot duration.
+  // Sorting/clamping also handles snapshots captured before native duration became available.
+  val cached = timeline.cachedRanges.filter { it.startSeconds.isFinite() && it.endSeconds.isFinite() }
+    .mapNotNull { range ->
+      val start = range.startSeconds.coerceIn(0.0, durationSeconds)
+      val end = range.endSeconds.coerceIn(0.0, durationSeconds)
+      if (start < end) start to end else null
+    }.sortedBy { it.first }
 
   return buildList {
-    timeline.cachedRanges.forEach { range ->
-      add(TimelineClassifiedInterval(range.startSeconds, range.endSeconds, TimelineIntervalKind.Cached))
+    fun interval(start: Double, end: Double, isCached: Boolean) {
+      if (start >= end) return
+      val playedEnd = minOf(end, position)
+      if (start < playedEnd) {
+        add(TimelineClassifiedInterval(
+          start,
+          playedEnd,
+          if (isCached) TimelineIntervalKind.PlayedCached else TimelineIntervalKind.PlayedUncached,
+        ))
+      }
+      val unplayedStart = maxOf(start, position)
+      if (unplayedStart < end) {
+        add(TimelineClassifiedInterval(
+          unplayedStart,
+          end,
+          if (isCached) TimelineIntervalKind.UnplayedCached else TimelineIntervalKind.UnplayedUncached,
+        ))
+      }
     }
-    timeline.uncachedRanges.forEach { range ->
-      add(TimelineClassifiedInterval(range.startSeconds, range.endSeconds, TimelineIntervalKind.Uncached))
+    var cursor = 0.0
+    for ((start, end) in cached) {
+      interval(cursor, start, isCached = false)
+      interval(maxOf(cursor, start), end, isCached = true)
+      cursor = maxOf(cursor, end)
     }
-  }.sortedWith(compareBy(TimelineClassifiedInterval::startSeconds, TimelineClassifiedInterval::endSeconds))
+    interval(cursor, durationSeconds, isCached = false)
+  }
 }
 
 @Composable
@@ -188,16 +224,19 @@ internal fun CachedTimelineCanvas(
   Canvas(modifier) {
     val centerY = size.height / 2f
     val stroke = lineWidth.toPx()
-    val total = duration.coerceAtLeast(0f)
-    val pointFraction = if (total > 0f) (position / total).coerceIn(0f, 1f) else 0f
+    val total = duration.takeIf { it.isFinite() && it > 0f } ?: 0f
+    val point = position.takeIf { it.isFinite() }?.coerceIn(0f, total) ?: 0f
+    val pointFraction = if (total > 0f) point / total else 0f
 
     val colors = TimelineColorPalette(
-      cached = Color.White.copy(alpha = 0.58f),
-      uncached = Color.White.copy(alpha = 0.24f),
+      playedCached = Color.White,
+      playedUncached = Color.White.copy(alpha = 0.70f),
+      unplayedCached = Color.White.copy(alpha = 0.46f),
+      unplayedUncached = Color.White.copy(alpha = 0.20f),
     )
 
     if (total > 0f) {
-      classifyTimelineIntervals(timeline, total.toDouble()).forEach { interval ->
+      classifyTimelineIntervals(timeline, total.toDouble(), point.toDouble()).forEach { interval ->
         drawLine(
           color = colors.colorFor(interval.kind),
           start = Offset((interval.startSeconds / total * size.width).toFloat(), centerY),
@@ -208,7 +247,7 @@ internal fun CachedTimelineCanvas(
       }
     } else {
       drawLine(
-        color = colors.uncached,
+        color = colors.unplayedUncached,
         start = Offset(0f, centerY),
         end = Offset(size.width, centerY),
         strokeWidth = stroke,

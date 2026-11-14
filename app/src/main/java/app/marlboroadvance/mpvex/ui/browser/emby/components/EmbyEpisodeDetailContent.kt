@@ -64,6 +64,7 @@ import app.marlboroadvance.mpvex.domain.emby.EmbyUserData
 import app.marlboroadvance.mpvex.domain.emby.buildEmbyVersionMediaInfo
 import app.marlboroadvance.mpvex.domain.emby.EmbyTicks
 import app.marlboroadvance.mpvex.domain.emby.EmbyVersionProgress
+import app.marlboroadvance.mpvex.domain.emby.playback.PlaybackDetailOrigin
 import app.marlboroadvance.mpvex.domain.emby.playback.LoembyMediaSelection
 import app.marlboroadvance.mpvex.domain.playbackstate.repository.PlaybackStateRepository
 import app.marlboroadvance.mpvex.ui.browser.emby.AutoLoadMore
@@ -95,6 +96,7 @@ internal fun EmbyMediaDetailContent(
   item: EmbyItem,
   server: EmbyServer,
   viewModel: EmbyViewModel,
+  detailEntryId: String,
   onBack: () -> Unit,
   onOpenEpisode: (EmbyItem) -> Unit,
   onOpenSeries: (EmbyItem) -> Unit,
@@ -272,6 +274,7 @@ internal fun EmbyMediaDetailContent(
           videoSelect = selected.video, audioSelect = selected.audio, subtitleSelect = selected.subtitle,
           selectPolicy = policy, versionSelect = selected.version,
           useDirectLink = forceDirect && supportsDirect, selectionCurrentItemOnly = true,
+          detailOrigin = if (isEpisode) PlaybackDetailOrigin(detailEntryId, itemId) else null,
         )
       } catch (error: CancellationException) { throw error }
       catch (_: Exception) { Toast.makeText(context, "播放失败，请重试", Toast.LENGTH_SHORT).show() }

@@ -27,14 +27,18 @@ class PlaybackScrobbler internal constructor(
   private val notify: (String) -> Unit,
   private val nowSeconds: () -> Long = { System.currentTimeMillis() / 1000 },
   private val wait: suspend (Long) -> Unit = { delay(it) },
+  private val validate: suspend (PlaybackConfiguration) -> Boolean = { current(it) },
 ) {
   constructor(http: LoopbackHttpPool, configs: PlaybackConfigurationRepository, notify: (String) -> Unit = {}) : this(
     ScrobbleTransport { url, body, headers, danger ->
       http.execute(server = null, url = url, method = "POST", body = body,
-        kind = LoopbackHttpPool.Kind.API, headers = headers, dangerAcceptInvalidCerts = danger, retry = false).use { response ->
-        ScrobbleResponse(response.code, response.body.string(), response.header("Retry-After"))
+        kind = LoopbackHttpPool.Kind.API, headers = headers, dangerAcceptInvalidCerts = danger, retry = false,
+        redirectPolicy = LoopbackHttpPool.RedirectPolicy.NONE).use { response ->
+        val source = response.body.source()
+        if (source.request(MAX_RESPONSE_BYTES + 1L)) throw ScrobbleFailure()
+        ScrobbleResponse(response.code, source.readUtf8(), response.header("Retry-After"))
       }
-    }, configs::isCurrent, notify,
+    }, configs::isCurrent, notify, validate = configs::validateCurrent,
   )
 
   private val _notifications = MutableSharedFlow<String>(extraBufferCapacity = 16)
@@ -69,11 +73,15 @@ class PlaybackScrobbler internal constructor(
   }
 
   suspend fun stop(session: PlaybackScrobbleSession, positionSeconds: Double, durationSeconds: Double) {
-    if (!session.stopped.compareAndSet(false, true)) return
+    if (session.stopped.get()) return
     val config = session.configuration
-    if (!current(config)) {
+    val valid = try { validate(config) && current(config) } catch (cancelled: CancellationException) {
+      throw cancelled
+    } catch (_: Exception) { false }
+    if (!session.stopped.compareAndSet(false, true)) return
+    if (!valid) {
       tokenMutex.withLock { memoryToken = null; tokenSource = null; tokenFingerprint = null }
-      safeNotify("播放同步失败：PostgreSQL 配置来源已变更")
+      safeNotify("播放同步失败：配置来源或网络路由已变更")
       return
     }
     val base = session.payload ?: return
@@ -105,8 +113,8 @@ class PlaybackScrobbler internal constructor(
     _notifications.tryEmit(message)
     runCatching { notify(message) }
   }
-  private fun ensureCurrent(config: PlaybackConfiguration) {
-    if (!current(config)) throw ScrobbleFailure()
+  private suspend fun ensureCurrent(config: PlaybackConfiguration) {
+    if (!validate(config) || !current(config)) throw ScrobbleFailure()
   }
 
   private suspend fun sendTrakt(config: PlaybackConfiguration, payload: JsonObject, action: String) {
@@ -116,7 +124,7 @@ class PlaybackScrobbler internal constructor(
     while (true) {
       ensureCurrent(config)
       val response = transport.post(
-        "$TRAKT_API/scrobble/$action",
+        config.trakt.reverseRoute.resolveUrl("$TRAKT_API/scrobble/$action"),
         payload.toString(),
         commonHeaders() + mapOf(
           "Authorization" to "Bearer $token",
@@ -141,7 +149,7 @@ class PlaybackScrobbler internal constructor(
     val token = config.simkl.accessToken.takeIf { it.isNotBlank() } ?: throw ScrobbleFailure()
     post(
       config,
-      "$SIMKL_API/scrobble/$action",
+      config.simkl.reverseRoute.resolveUrl("$SIMKL_API/scrobble/$action"),
       payload,
       commonHeaders() + mapOf("Authorization" to "Bearer $token", "simkl-api-key" to SIMKL_CLIENT_ID),
     )
@@ -168,7 +176,7 @@ class PlaybackScrobbler internal constructor(
     try {
       post(
         config,
-        url,
+        config.yamTrack.reverseRoute.resolveUrl(url),
         payload,
         commonHeaders(),
         retryTransientServerErrors = true,
@@ -247,7 +255,7 @@ class PlaybackScrobbler internal constructor(
     val redirect = runtime.redirectUri.takeIf { it.isNotBlank() } ?: throw ScrobbleFailure()
     if (existing.refresh.isBlank()) throw ScrobbleFailure()
     val body = buildJsonObject { put("code", JsonNull); put("refresh_token", existing.refresh); put("redirect_uri", redirect) }
-    val response = post(config, TRAKT_TOKEN_EXCHANGE, body, commonHeaders())
+    val response = post(config, runtime.reverseRoute.resolveUrl(TRAKT_TOKEN_EXCHANGE), body, commonHeaders())
     val parsed = json.parseToJsonElement(response.body).jsonObject
     val access = parsed["access_token"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() } ?: throw ScrobbleFailure()
     val refresh = parsed["refresh_token"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() } ?: throw ScrobbleFailure()
@@ -261,6 +269,7 @@ class PlaybackScrobbler internal constructor(
 
   companion object {
     private const val MAX_RETRIES = 3
+    private const val MAX_RESPONSE_BYTES = 256 * 1024
     private const val TRAKT_API = "https://api.trakt.tv"
     private const val SIMKL_API = "https://api.simkl.com"
     private const val TRAKT_TOKEN_EXCHANGE = "https://token-exchange.i101.workers.dev/trakt"

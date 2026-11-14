@@ -1,6 +1,7 @@
 package app.marlboroadvance.mpvex.domain.emby.playback
 
 import android.content.Context
+import app.marlboroadvance.mpvex.domain.emby.EmbyLog
 import app.marlboroadvance.mpvex.domain.emby.EmbyServer
 import app.marlboroadvance.mpvex.domain.postgres.SubtitleCacheConfiguration
 import kotlinx.coroutines.CancellationException
@@ -55,6 +56,9 @@ class LoopbackSubtitleCache internal constructor(
       } catch (cancelled: CancellationException) {
         throw cancelled
       } catch (failure: Throwable) {
+        // Optional prefetch cannot interrupt video playback. Never log the URL, response body or
+        // throwable message: subtitle URLs and transport exceptions can contain session credentials.
+        EmbyLog.warn("播放后台操作失败 operation=subtitle-prefetch error=${failure.javaClass.simpleName}")
         onFailure(failure)
       } finally {
         temporary.delete()

@@ -317,7 +317,7 @@
   <string name="toast_file_no_longer_exists">File no longer exists</string>
   <string name="toast_playback_failed">Playback failed: the media could not be opened</string>
   <string name="volume_slider_absolute_value" translatable="false">%d</string>
-  <string name="github_repo_url" translatable="false">https://github.com/nu1lkali/CineIsle</string>
+  <string name="github_repo_url" translatable="false">https://github.com/NPCDW/loembyA</string>
   <string name="pref_player_display_hide_player_control_time">Hide player control time</string>
   <plurals name="seconds">
     <item quantity="one">%1$d second</item>
@@ -357,10 +357,10 @@
   <string name="notification_playing">Playing</string>
   <!-- Media Info Activity -->
   <string name="pref_player_use_precise_seeking">Use precise seeking</string>
-  <string name="pref_player_disk_cache">Cache streams to disk</string>
-  <string name="pref_player_disk_cache_summary">Keep watched network streams on disk so re-watching does not download them again</string>
-  <string name="pref_player_disk_cache_size">Cache size limit</string>
-  <string name="pref_player_disk_cache_size_summary">Per stream</string>
+  <string name="pref_player_disk_cache">Temporary disk buffering</string>
+  <string name="player_buffering">Buffering…</string>
+  <string name="player_buffering_progress">Buffering… %1$d%%</string>
+  <string name="pref_player_disk_cache_summary">Buffer demuxer data on disk during playback and remove it on close; no offline playback or reuse across sessions</string>
   <string name="pref_player_clear_disk_cache">Clear stream cache</string>
   <string name="pref_player_clear_disk_cache_summary">Delete cached Emby stream data</string>
   <!-- Additional strings for Chinese translation compatibility -->
@@ -612,14 +612,15 @@
   <string name="i18n_mpv_gpu_hq">GPU HQ</string>
   <string name="i18n_mpv_low_latency">Low Latency</string>
   <string name="i18n_mpv_sw_fast">SW Fast</string>
-  <string name="i18n_about_upstream_project">Original project</string>
+  <string name="i18n_about_project_source">loembyA source code</string>
+  <string name="i18n_ack_licenses_summary">Full dependency list and open-source licenses.</string>
   <string name="i18n_ack_title">Acknowledgments</string>
   <string name="i18n_ack_tap_to_open">Open the project page</string>
   <string name="i18n_ack_cineisle_summary">Direct upstream — thank you for the Emby client and feature foundation on which loembyA continues development.</string>
   <string name="i18n_ack_mpvex_summary">Earlier upstream — the player foundation on which CineIsle was built.</string>
   <string name="i18n_ack_mpv_android_summary">mpv bindings and libmpv integration — the primary playback core.</string>
   <string name="i18n_ack_danmaku_summary">Danmaku rendering engine — vendored as source, with scroll-lifetime and timer fixes.</string>
-  <string name="i18n_ack_emby_summary">Official Emby Java SDK — the client\'s API layer is built on it.</string>
+  <string name="i18n_ack_emby_summary">Official Emby Java SDK — uncompiled API reference; networking uses the handwritten client.</string>
   <string name="i18n_ack_aboutlibraries_summary">Generates the open-source license list on this screen.</string>
   <string name="i18n_ack_telephoto_summary">Pinch-to-zoom / pan / double-tap zoom gestures for the photo browser.</string>
   <string name="i18n_ack_coil_summary">Image loading, sampling and caching layer for the photo browser and photo grid.</string>
@@ -835,7 +836,7 @@
   <string name="cine_favorites_people_empty_title">No favorite people</string>
   <string name="cine_favorites_people_empty_desc">People you favorite will show up here</string>
 
-  <!-- v131：Cine 长按玻璃菜单（对齐 Classic 的 EmbyMediaActionsDialog 全部动作） -->
+  <!-- Cine context menu actions, aligned with Classic. -->
   <string name="cine_action_open">Open</string>
   <string name="cine_action_scan">Scan library</string>
   <string name="cine_action_scan_done">Asked the server to scan %1$s</string>

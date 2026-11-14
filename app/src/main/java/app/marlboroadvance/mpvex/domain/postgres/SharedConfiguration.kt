@@ -1,6 +1,7 @@
 package app.marlboroadvance.mpvex.domain.postgres
 
 import app.marlboroadvance.mpvex.domain.emby.EmbyRepository
+import app.marlboroadvance.mpvex.domain.emby.ReverseProxyRoute
 import java.net.IDN
 import java.net.URI
 import java.time.Instant
@@ -80,6 +81,21 @@ internal object SharedConfigurationSanitizer {
   ): SharedConfigurationSnapshot {
     require(raw.values.keys.all { it in ANDROID_GLOBAL_CONFIG_ALLOWLIST })
     val values = raw.values
+    fun reverseItem(label: String, key: String): SharedConfigurationItem {
+      val id = values[key]
+      val row = raw.reverseProxies[id]
+      val route = ReverseProxyRoute.selected(id, row?.url)
+      return item(label, when (route.state) {
+        ReverseProxyRoute.State.DIRECT -> "未使用"
+        ReverseProxyRoute.State.BLOCKED -> "引用无效；请求已阻止"
+        ReverseProxyRoute.State.REVERSE ->
+          "${clean(row?.name, MAX_NAME).ifEmpty { "未命名反向代理" }} · ${sanitizeEndpoint(row?.url)}"
+      }, when (route.state) {
+        ReverseProxyRoute.State.DIRECT -> "直接连接"
+        ReverseProxyRoute.State.BLOCKED -> "不会回退到直连或服务器线路"
+        ReverseProxyRoute.State.REVERSE -> "引用有效"
+      })
+    }
 
     val playback = listOf(
       item("自动版本策略", clean(values["play_version_auto_select_policy"] ?: "high-resolution")),
@@ -93,11 +109,13 @@ internal object SharedConfigurationSanitizer {
       item("后向最大缓存 MiB", number(values["mpv_cache_back_max_bytes"], "0")),
     )
     val network = listOf(
+      reverseItem("应用数据、外部图标与更新反向代理", "app_reverse_proxy_id"),
       item("忽略 TLS 证书错误", yesNo(values["danger_accept_invalid_certs"] == "true"), "高风险".takeIf { values["danger_accept_invalid_certs"] == "true" }),
       item("字幕保留天数", number(values["subtitleStoredDays"], "1")),
       item("桌面端上次字幕清理", epochSeconds(values["lastCleanSubtitleTime"])),
     )
     val trakt = listOf(
+      reverseItem("服务反向代理", "trakt_reverse_proxy_id"),
       item("同步", enabled(values["trakt_sync_switch"])),
       item("用户名", maskAccount(values["trakt_username"])),
       item("Access Token", status(values["trakt_access_token"])),
@@ -106,15 +124,20 @@ internal object SharedConfigurationSanitizer {
       item("Redirect URI", sanitizeEndpoint(values["trakt_redirect_uri"])),
     )
     val simkl = listOf(
+      reverseItem("服务反向代理", "simkl_reverse_proxy_id"),
       item("同步", enabled(values["simkl_sync_switch"])),
       item("用户名", maskAccount(values["simkl_username"])),
       item("Access Token", status(values["simkl_access_token"])),
     )
     val yamTrack = listOf(
+      reverseItem("服务反向代理", "yamtrack_reverse_proxy_id"),
       item("同步", enabled(values["yamtrack_sync_switch"])),
       item("Webhook", sanitizeEndpoint(values["yamtrack_sync_url"])),
     )
-    val reverseProxies = raw.reverseProxies.values.filter { proxy -> raw.servers.any { it.reverseProxyId == proxy.id } }.map { proxy ->
+    val referencedIds = raw.servers.map { it.reverseProxyId }.toSet() + listOf(
+      "app_reverse_proxy_id", "trakt_reverse_proxy_id", "simkl_reverse_proxy_id", "yamtrack_reverse_proxy_id",
+    ).mapNotNull(values::get)
+    val reverseProxies = raw.reverseProxies.values.filter { it.id in referencedIds }.map { proxy ->
       item(clean(proxy.name, MAX_NAME).ifEmpty { "未命名反向代理" }, sanitizeEndpoint(proxy.url), "已引用")
     }
 

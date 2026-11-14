@@ -149,10 +149,7 @@ public class DanmakuUtils {
         if (r != 0)
             return r < 0 ? -1 : 1;
 
-        // CineIsle v115（原库 Bug 修复）：原实现是 `obj1.hashCode() - obj1.hashCode()`，
-        // 恒等于 0 —— 与 obj2 比却返回「相等」，TreeSet.add 对判定相等的项直接返回 false，
-        // 于是「同毫秒 + 同 index」的弹幕被**静默丢弃**（addItem 返回 boolean，没人检查）。
-        // 改为 obj2 才是比较器的本意。
+        // 时间与 index 相同时比较两个对象的 hash，避免 TreeSet 将不同弹幕判作相等而丢弃。
         r = obj1.hashCode() - obj2.hashCode();
         return r;
     }

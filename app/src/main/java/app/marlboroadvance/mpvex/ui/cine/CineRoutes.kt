@@ -12,11 +12,9 @@ import app.marlboroadvance.mpvex.ui.cine.person.CinePersonScreen
 /**
  * Cine 路由表：**只登记已经重做过的页面**，没登记的一律回落 Classic。
  *
- * ## 这是整套方案能分期发版的关键
- * 页面契约（`Screen` 数据类 + `Content()`）不变，所以分流可以放在渲染处：
- * `MainActivity` 的 `entryProvider` 里写一次 `if (Cine) CineRoute(route) { route.Content() }`，
- * 之后每重做一个页面，只需要在下面加一行 —— **不需要改任何老页面**，
- * 也不会出现「某条路由没人画」的黑屏。
+ * ## 共享导航契约
+ * 页面契约（`Screen` 数据类 + `Content()`）保持一致，在渲染处选择 Cine 或 Classic。
+ * 已登记页面由 Cine 渲染，未登记页面通过 `fallback()` 渲染，不留无人处理的导航 entry。
  *
  * ## 已经迁到 Cine 的页面
  * 详情、媒体库、演员作品和只读服务器列表。
@@ -32,7 +30,7 @@ import app.marlboroadvance.mpvex.ui.cine.person.CinePersonScreen
  * `CineTheme` 在 `MainScreen` 里只包住了底部 tab 的 `CineRoot`。详情页 / 媒体库页是
  * **独立的导航 entry**，由 `NavDisplay` 直接渲染，**不在 `CineRoot` 子树内** ——
  * 少包一层 `CineTheme` 就会在组合第一帧抛
- * `IllegalStateException: CineColors 未提供`（v129 线上崩溃真凶）。
+ * `IllegalStateException: CineColors 未提供`。
  *
  * 回落分支**不**包 `CineTheme`：Classic 页面应当用原样的 M3 字阶。
  */

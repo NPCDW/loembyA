@@ -293,7 +293,7 @@ private enum class GachaPhase { Awaiting, Charging, Burst, Card }
  * ⚠️ `getEnum` 存的是枚举 `name`，发布后**不能改名**（改了老用户的偏好看不到）。
  */
 enum class EmbyGachaStyle(val label: String) {
-  /** 一张大卡从 -82° 翻正（v197 起的默认形态） */
+  /** 一张大卡从 -82° 翻正。 */
   CLASSIC("经典翻牌"),
 
   /** 卡片自右向左滚动的横向卡带，先加速后减速停在中奖卡上 */
@@ -539,13 +539,9 @@ internal fun EmbyGachaDrawDialog(
    */
   var reelFinished by remember { mutableStateOf(false) }
   /**
-   * 「共鸣」（v202）：蓄能打满之后、白光爆开之前的**那一下回缩**。
-   *
-   * 0 → 1 的过程里法阵整体向内收（半径 ×0.80、刻度线变短、中心核压小），
-   * 收到位的一瞬间才炸开。加这一段是因为原来「蓄能拉满 → 直接闪白」太直 ——
-   * 蓄能段走完时画面已经是最亮的一张，再闪白只是「亮上更亮」，看不出「要放了」。
-   * 先收一下再炸，观感上有「吸一口气」的蓄势感，总时长只多 [GATHER_MS]（160ms），
-   * 不做成大幅缩放/旋转，避免变成放烟花。
+   * 「共鸣」：蓄能打满后、白光爆开前的回缩。
+   * 法阵向内收，再于收拢瞬间炸开，形成短暂蓄势；总时长为 [GATHER_MS]（160ms）。
+   * 不做大幅缩放或旋转，避免喧宾夺主。
    */
   val gather = remember { Animatable(0f) }
   /** 第二道「回声」冲击波（见 [drawBurstRays] 的 echo 说明）。 */
@@ -588,16 +584,8 @@ internal fun EmbyGachaDrawDialog(
 
   val gridTotalMs = GRID_REVEAL_BASE_MS + (count - 1).coerceAtLeast(0) * GRID_STAGGER_MS
 
-  // ── 重抽时「法阵闪回 0」的修复（v202）──
-  //
-  // 时序：`rollGacha` 先把 `gachaCards` 清空 → 本组件的 `count` 变 0 →
-  // `LaunchedEffect(server, rollId, count)` 抢先重跑，而首行 `if (cards.isEmpty()) return` 让
-  // **六个 Animatable 的 snapTo(0) 全被跳过**（idle 也在下面被 restart）。
-  // 等新数据回来、effect 再跑一次时才 snapTo —— 此刻画面上法阵早已停在原来的角度，
-  // 用户看到的就是刻度环「亮一下、转回去、重新转」。
-  // 修法：在**组合期**发现「卡已清空但旧批的进度还在」就把进度归零。
-  // 组合期改 Animatable 只能 `snapTo`（挂起函数），所以包一层 `LaunchedEffect(Unit)`；
-  // 判据用 `phase != Awaiting`，只在「Card/Burst 态遇到清空」时触发一次，不会每帧重来。
+  // 卡片清空时立即重置旧批动画；取数期间 effect 会因空列表返回，不能等新数据再 snapTo。
+  // 仅在非 Awaiting 状态触发一次，避免重抽时刻度环先沿用旧角度、再突然闪回零。
   if (cards.isEmpty() && phase != GachaPhase.Awaiting) {
     LaunchedEffect(server, rollId) {
       charge.snapTo(0f)
@@ -716,7 +704,7 @@ internal fun EmbyGachaDrawDialog(
     launch {
       shock.animateTo(1f, tween(760, easing = LinearOutSlowInEasing))
     }
-    // 回声波（v202）：第二道慢一倍、细一半的冲击波，跟着第一道一起铺开。
+    // 回声波：第二道慢一倍、细一半的冲击波，跟着第一道一起铺开。
     // 只有这一层薄薄的回声，不加第二组放射线 —— 加了就成烟花了。
     launch {
       echo.animateTo(1f, tween(ECHO_MS, easing = LinearOutSlowInEasing))
@@ -737,7 +725,7 @@ internal fun EmbyGachaDrawDialog(
         delay((SLOT_SPIN_MS * 0.80f).toLong())
         slotBlur = 0f
       }
-      // 棘爪回弹（v216）：滚动 + 过冲 + 归位**画在同一条 keyframes 里**（见 slotSpinSpec）——
+      // 棘爪回弹：滚动、过冲与归位共用一条 keyframes（见 slotSpinSpec），
       // 先带着惯性冲过齿位 SLOT_OVERSHOOT，再柔和地滑回落点，中间没有「停住再起」的接缝。
       // ⚠️ 别拆成两个 `animateTo`：那样两段之间会空一拍，真机读作「僵一下、然后瞬间弹回去」。
       // ⚠️ 过冲段占用的那点空间靠卡带末尾的 SLOT_TAIL 张陪跑卡兜住（见 buildSlotStrip）。
@@ -1001,7 +989,7 @@ internal fun EmbyGachaDrawDialog(
             //    它在**测量阶段**执行，外层任何状态变化（单抽的 detailIn、详情层的
             //    focused、底栏的 actionsAlpha…）都会把它重跑一遍。而 gachaCodeOf 里
             //    是「一次全角归一（逐字符遍历）+ 最多两次正则」× 10 张 —— 不 remember
-            //    就等于每次重组白跑 10 遍字符串归一，纯浪费（v202 实测发现）。
+            //    会在每次重组重复遍历整批标题。
             val codes = remember(cards) { cards.map { gachaCodeOf(it.title) } }
             val captionH = if (codes.any { it != null }) GACHA_CAPTION_HEIGHT else 0.dp
 
@@ -1113,7 +1101,7 @@ internal fun EmbyGachaDrawDialog(
             OutlinedButton(
               // 整批起播：第 1 张起播，其余按揭晓顺序排队（不打乱 —— 顺序就是刚看到的顺序）
               //
-              // ⚠️ 文案是「队列播放」不是「全部入队」（v202）：`launchPlaylist` 起的是
+              // 文案使用「队列播放」而非「全部入队」：`launchPlaylist` 起的是
               //    **新**播放列表，原有队列会被整批替换。「入队」会让人以为在旧队列后面
               //    接着排，名不副实。
               onClick = { onPlayAll(cards) },
@@ -1298,8 +1286,7 @@ internal fun EmbyGachaDrawDialog(
       // ── 5. 顶部说明 + 关闭 ──
       // 关闭键**全程可用**：抽卡是锦上添花的功能，任何阶段都得让人能退出
       //
-      // 文案跟着共鸣走（v202）：蓄满收那一下写「共鸣」，炸开前的那 160ms 是有内容的，
-      // 一直写「祈愿中…」会让人以为卡住了。共鸣结束就进 Burst，文字随即切到「本次抽到」。
+      // 回缩阶段显示「共鸣」，进入 Burst 后切到「本次抽到」，保持文案与动画阶段一致。
       Text(
         text = when (phase) {
           GachaPhase.Awaiting -> "正在准备卡池…"
@@ -1683,7 +1670,7 @@ private fun GachaSlotReel(
  * d1 : d2 : d3 = 0.259 : 0.519 : 0.222 —— 就在下面这三个点上。
  * 交界处只要两段末速/初速相等，画面就不会「顿一下」。
  *
- * ## 棘爪回弹为什么也画在同一段 keyframes 里（v216）
+ * ## 棘爪回弹为什么也画在同一段 keyframes 里
  * 做成「先 `animateTo(notch)` 停下、再 `animateTo(rest)` 拉回」时，两个 `animateTo`
  * 之间会空出**一拍**（前一段收尾的那帧 dt=0、后一段重新计时起步）—— 真机手感就是
  * 「过冲之后先僵一下、再瞬间弹回去」。合进同一条 keyframes 之后，减速段的尾巴直接

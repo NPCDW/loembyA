@@ -6,7 +6,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.ServiceConnection
-import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import androidx.compose.runtime.Composable
 import app.marlboroadvance.mpvex.ui.player.danmaku.DanmakuOverlay
@@ -41,10 +40,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.koin.compose.koinInject
@@ -183,15 +184,8 @@ open class PlayerActivity :
   internal val playbackEventGeneration: Long get() = localLoadGeneration
   private var localLoadGeneration = 0L
 
-  /** Orientation is chosen once per file, unless the user takes over with the rotate action. */
-  private var orientationState: PlayerOrientationLock = PlayerOrientationLock.WaitingForVideo
-  private var orientationItemId: String? = null
-
-  private sealed interface PlayerOrientationLock {
-    data object WaitingForVideo : PlayerOrientationLock
-    data class Automatic(val orientation: Int) : PlayerOrientationLock
-    data class Manual(val orientation: Int) : PlayerOrientationLock
-  }
+  /** Metadata is provisional; current-file native geometry wins unless the user rotates. */
+  private var orientationState = PlayerOrientationState()
   private val loembyTransport: LoembyMpvTransport = object : LoembyMpvTransport {
     override fun command(vararg args: String) = PlayerLib.command(*args)
     override fun replaceCurrentPlaylistEntry(url: String) {
@@ -214,6 +208,8 @@ open class PlayerActivity :
       if (isDestroyed || !mpvInitialized) return
       loembyPlaybackState.value = state
       state.resolved?.let { resolved ->
+        val video = resolved.source.MediaStreams.orEmpty().firstOrNull { it.Type.equals("Video", ignoreCase = true) }
+        updateOrientation(orientationState.metadata(state.url, video?.Width, video?.Height))
         embyMediaSourceByItemId = embyMediaSourceByItemId + (state.spec.itemId to resolved.source.Id.orEmpty())
         val names = playlistMediaSourceNames.toMutableList()
         while (names.size <= playlistIndex) names.add("")
@@ -660,6 +656,7 @@ open class PlayerActivity :
     localLoadJob?.cancel()
     val generation = ++localLoadGeneration
     val source = intent
+    prepareOrientationForFile(url)
     localLoadJob = lifecycleScope.launch {
       try {
         loemby.prepare(url, loembyTransport, loembyCallbacks, this@PlayerActivity)
@@ -688,6 +685,7 @@ open class PlayerActivity :
     }
     val logicalUris = if (playlist.isEmpty()) listOf(Uri.parse(uri)) else playlist
     remoteIsoRejected = false
+    prepareOrientationForFile(uri)
     viewModel.onLoadingNewFile()
     localLoadJob = lifecycleScope.launch {
       try {
@@ -758,6 +756,7 @@ open class PlayerActivity :
           playbackConfigurations.snapshot(server)
         }.getOrNull()?.let(::sharedPrefetchPlaylistEnabled) == true
 
+        prepareOrientationForFile(local)
         loemby.prepare(local, loembyTransport, loembyCallbacks, this@PlayerActivity)
         if (generation != localLoadGeneration || source !== intent || isDestroyed || !mpvInitialized) return@launch
         nativePlaylist.replace(localUrls, startIndex, prefetch)
@@ -866,6 +865,7 @@ open class PlayerActivity :
     } else {
       0L
     }
+    prepareOrientationForFile(target)
     viewModel.onLoadingNewFile()
     localLoadJob = lifecycleScope.launch {
       try {
@@ -963,18 +963,8 @@ open class PlayerActivity :
             },
             modifier = Modifier,
           )
-          // ── 「出画面前」的加载层 ────────────────────────────────
-          // 从进入播放器到首帧真正上屏（MPV_EVENT_PLAYBACK_RESTART）之间，
-          // 视频 Surface 是**纯黑**的 —— 原来这里什么都没有，只有一片黑。
-          // ⚠️ 关键：它**必须挂在 PlayerControls 之外**。
-          //   `PlayerControls` 内部的缓冲转圈被包在
-          //   `AnimatedVisibility(visible = controlsShown)` 里（PlayerControls.kt:845），
-          //   而 `controlsShown` 的**初值就是 false**（PlayerViewModel.kt:224）
-          //   ⇒ 首帧前控件是收着的，那个转圈根本不显示。
-          //   放在这里才不受控件显隐影响。
-          // 复用播放器的「显示缓冲转圈」开关（`show_loading_circle`）：
-          // 语义一致（都是「正在等画面」），而且设置页已经有这一项，不新增开关。
-          PlayerFirstFrameLoading(
+          // Loading is outside controlsShown: startup and later cache starvation must both stay visible.
+          PlayerLoadingOverlay(
             viewModel = viewModel,
             modifier = Modifier.align(Alignment.Center),
           )
@@ -1070,7 +1060,7 @@ open class PlayerActivity :
             },
             modifier = Modifier.align(Alignment.Center),
           )
-          // 弹幕层**不在这里**了（V118）：它已挪到 `binding.danmaku` 这一独立图层，
+          // 弹幕层**不在这里**了：它已挪到 `binding.danmaku` 这一独立图层，
           // 声明在 controls **之前**（= 画在它下面、触摸也让给它）。
           // 原因见 [mountDanmakuLayer]。
         }
@@ -1081,7 +1071,7 @@ open class PlayerActivity :
   /**
    * 把弹幕叠层挂到**它自己的 ComposeView**（`binding.danmaku`）上。
    *
-   * ⚠️ V118：这是「点屏幕唤不出控制栏」的根因修复，别再挪回控件那棵 Compose 树里。
+   * ⚠️ 这是「点屏幕唤不出控制栏」的根因修复，别再挪回控件那棵 Compose 树里。
    *
    * 之前弹幕叠层是 `binding.controls` 那棵 Compose 树里**最靠后（= 最上层）的全屏
    * `AndroidView`**。Compose 的命中测试里，兄弟节点按 z 序**上面那个先收事件**；
@@ -1192,6 +1182,10 @@ open class PlayerActivity :
   @RequiresApi(Build.VERSION_CODES.P)
   override fun onDestroy() {
     Log.d(TAG, "PlayerActivity onDestroy")
+    if (mpvInitialized) {
+      viewModel.onPlaybackStopped()
+      orientationState = orientationState.stop()
+    }
     if (!mpvInitialized) {
       super.onDestroy()
       return
@@ -1409,6 +1403,8 @@ open class PlayerActivity :
 
   @RequiresApi(Build.VERSION_CODES.P)
   override fun finish() {
+    if (mpvInitialized) viewModel.onPlaybackStopped()
+    orientationState = orientationState.stop()
     runCatching {
       // Don't restore UI during normal finish to prevent flickering
       // System will handle UI restoration automatically
@@ -1428,6 +1424,8 @@ open class PlayerActivity :
 
   // finishAndRemoveTask() was added in API 21, but since our minSdk is 26, it's always available
   override fun finishAndRemoveTask() {
+    if (mpvInitialized) viewModel.onPlaybackStopped()
+    orientationState = orientationState.stop()
     runCatching {
       // Don't restore UI during normal finish to prevent flickering
       // System will handle UI restoration automatically
@@ -1968,6 +1966,11 @@ open class PlayerActivity :
     value: Long,
   ) {
     when (property) {
+      "cache-buffering-state" -> {
+        if (!isFinishing && mpvInitialized && orientationState.nativeStarted) {
+          viewModel.onNativeBufferingProgress(value)
+        }
+      }
       "video-params/w",
       "video-params/h",
       "video-params/rotate" -> {
@@ -2005,11 +2008,18 @@ open class PlayerActivity :
   ) {
     when (property) {
       "pause" -> {
+        if (orientationState.nativeStarted) viewModel.onNativePause(value)
         handlePauseStateChange(value)
         // Ensure isReady is set when playback starts
         if (!value && !isReady) {
           isReady = true
         }
+      }
+      "paused-for-cache" -> {
+        if (!isFinishing && mpvInitialized && orientationState.nativeStarted) viewModel.onPausedForCache(value)
+      }
+      "seeking" -> {
+        if (!isFinishing && mpvInitialized && orientationState.nativeStarted) viewModel.onNativeSeeking(value)
       }
       "eof-reached" -> if (value) loemby.eofReached(this)
     }
@@ -2495,7 +2505,7 @@ private fun cancelAutoplayCountdown() {
   private fun handleEndOfFile(isEof: Boolean) {
     if (remoteIsoRejected) return
     if (isEof) {
-      // 诊断埋点（v162）：EOF 时「停在哪儿」比「有没有 EOF」有用得多。
+      // 诊断埋点：EOF 时「停在哪儿」比「有没有 EOF」有用得多。
       // 若 `pos` 比 `duration` 小了明显一截，这条流是**被提前掐断**的
       // （上游的问题，不是片子真播完了）。
       PlayerDiagLog.log(
@@ -2536,7 +2546,7 @@ private fun cancelAutoplayCountdown() {
   private var durationWatchdogJob: Job? = null
 
   /**
-   * 时长看守：mpv 报的时长**不可信**时，用别的来源把它救回来（v163 起，v164 扩到「报小了」）。
+   * 时长看守：mpv 报的时长**不可信**时，用别的来源把它救回来。
    *
    * ## mpv 在 `.mts` 上会怎么坏
    *
@@ -2577,7 +2587,7 @@ private fun cancelAutoplayCountdown() {
           if (PlayerLib.getPropertyBoolean("eof-reached") == true) return@launch
           val pos = PlayerLib.getPropertyDouble("time-pos") ?: continue
           val mpvDuration = PlayerLib.getPropertyDouble("duration") ?: 0.0
-          // 每秒把 mpv 当前值喂回 ViewModel（v179）：
+          // 每秒把 mpv 当前值喂回 ViewModel：
           //  ① 换片时 `resetProbedDuration` 会清掉 `_preciseDuration`，而 StateFlow
           //     不会因为「值没变」重发 ⇒ 只能靠这条轮询把时长补回去；
           //  ② 顺带走一遍「离谱值」闸门（见 `PlayerViewModel.acceptMpvDuration`）。
@@ -2589,7 +2599,7 @@ private fun cancelAutoplayCountdown() {
           //    注意「8 秒 vs 播到 15 秒」这种值在起播头一两秒看是**自洽的**
           //    （位置 1s < 8s），所以**绝不能一自洽就收工**，必须一直盯着。
           //  · missing：**根本没有时长**，且已经播过起步宽限 ⇒ 该探了。
-          //  · oversize：**时长比这份文件物理上能装下的还大一个量级** ⇒ 巨值（v179）。
+          //  · oversize：**时长比这份文件物理上能装下的还大一个量级** ⇒ 巨值。
           //    这条专治「放着放着变成几百小时」：overflow 在巨值面前永远不会触发
           //    （几小时的位置追不上几百小时），必须有这道独立的门。
           val overflow = effective > 0.0 && pos > effective + DURATION_WATCHDOG_TOLERANCE_SEC
@@ -2628,7 +2638,7 @@ private fun cancelAutoplayCountdown() {
   }
 
   /**
-   * 声称的时长是否**大得离谱**（v179）。
+   * 声称的时长是否**大得离谱**。
    *
    * 判据只有一条：`file-size × 8 ÷ (视频码率 + 音频码率)` 是这份文件**物理上**
    * 能装下的时长，声称值超过它的 [DURATION_OVERSIZE_FACTOR] 倍就不是估算误差能解释的。
@@ -2763,7 +2773,7 @@ private fun cancelAutoplayCountdown() {
    * @param property The property name that changed
    */
   internal fun onObserverEvent(property: String) {
-    // Currently no properties use this signature
+    if (property == "cache-buffering-state") viewModel.onNativeBufferingProgress(null)
   }
 
   /**
@@ -2792,10 +2802,13 @@ private fun cancelAutoplayCountdown() {
           playbackUrl = expectedUrl
           intent.data = Uri.parse(expectedUrl)
         }
-        val itemId = playlistItemIds.getOrNull(nativeIndex ?: playlistIndex)
-        if (itemId != orientationItemId) {
-          orientationItemId = itemId
-          resetAutomaticOrientationForFile()
+        val identity = playbackUrl ?: return
+        // START_FILE can precede path availability; native geometry is gated until a matching restart.
+        updateOrientation(orientationState.startFile(identity))
+        viewModel.onLoadingNewFile()
+        loembyPlaybackState.value?.takeIf { it.url == identity }?.resolved?.source?.let { selected ->
+          val video = selected.MediaStreams.orEmpty().firstOrNull { it.Type.equals("Video", ignoreCase = true) }
+          updateOrientation(orientationState.metadata(identity, video?.Width, video?.Height))
         }
       }
     }
@@ -2803,13 +2816,10 @@ private fun cancelAutoplayCountdown() {
     when (eventId) {
       MPVLib.MpvEvent.MPV_EVENT_FILE_LOADED -> {
         if (!loopback.ownsMediaUrl(playbackUrl.orEmpty(), PlayerLib.getPropertyString("path"))) return
+        viewModel.onLoadingNewFile()
         loemby.fileLoaded(this)
         handleFileLoaded()
         isReady = true
-        // 文件刚起来、画面还什么都没有 ⇒ 重新显示加载层。
-        // ⚠️ 必须在每次 loadfile 后复位：`isReady` 换片时不会清零，
-        //    拿它当加载判据会导致「只有第一集有加载动画」。
-        viewModel.onLoadingNewFile()
 
         // 换片：track-list 此刻已就绪 ⇒ 先判 DV Profile 5（硬解颜色修正），
         // 同时把上一部 HDR 片的 Window 色彩模式复位（video-params 还没出来，
@@ -2818,6 +2828,10 @@ private fun cancelAutoplayCountdown() {
       }
 
       MPVLib.MpvEvent.MPV_EVENT_PLAYBACK_RESTART -> {
+        val identity = playbackUrl ?: return
+        if (!loopback.ownsMediaUrl(identity, PlayerLib.getPropertyString("path"))) return
+        updateOrientation(orientationState.firstFrame(identity))
+        lockOrientationFromVideo()
         player.isExiting = false
         if (!isReady) {
           isReady = true
@@ -2859,7 +2873,7 @@ private fun cancelAutoplayCountdown() {
    *    认不出来就当没发生（宁可少弹一张卡，也不能把正常播放判成失败）。
    */
   private fun handleEndFileWithError(data: MPVNode?) {
-    if (isFinishing || isDestroyed) return
+    if (isFinishing || isDestroyed || !orientationState.nativeStarted) return
 
     val reasonNode = runCatching { data?.asMap()?.get("reason") }.getOrNull()
     val reasonText = runCatching { reasonNode?.asString() }.getOrNull()
@@ -2872,6 +2886,8 @@ private fun cancelAutoplayCountdown() {
       "reason=${reasonText ?: reasonInt} failed=$failed " +
         "firstFrame=${viewModel.firstFrameRendered.value} node=${runCatching { data?.toJson() }.getOrNull()}",
     )
+    viewModel.onPlaybackStopped()
+    orientationState = orientationState.stop()
     if (!failed) return
     if (viewModel.firstFrameRendered.value) return
 
@@ -2891,7 +2907,7 @@ private fun cancelAutoplayCountdown() {
     // 重试后拿到了新的直链）。不清的话错误卡片会一直压在画面上。
     viewModel.clearPlaybackError()
 
-    // ── 诊断埋点（v162）：「这次打开到底拿到了什么」──
+    // ── 诊断埋点：「这次打开到底拿到了什么」──
     // `.mts` / MPEG-TS 这类容器**没有内嵌索引**，时长完全取决于「能不能 seek 到尾部
     // 读最后一个 PTS」。若这一行里 `format=mpegts` 而 `duration` 明显偏小、
     // `seekable=false`，那就说明是取流层没能随机读取（代理回的长度不对 / 上游不支持
@@ -2905,7 +2921,7 @@ private fun cancelAutoplayCountdown() {
         "seekable=${PlayerLib.getPropertyBoolean("seekable")}",
     )
 
-    // 时长看守（v163 起，v164 扩到「报小了」）：mpv 的 duration 不可信时用原生解析顶上。
+    // 时长看守：mpv 的 duration 不可信时用原生解析顶上。
     // ⚠️ 必须在**每次** file-loaded 都调：换片要清掉上一部片的兜底值。
     startDurationWatchdog()
 
@@ -2928,10 +2944,7 @@ private fun cancelAutoplayCountdown() {
     startBackgroundPlayback()
 
     MpvNetSpeedSampler.reset()
-    val diskCacheLimitMb = playerPreferences.diskCacheSizeMb.get()
-    lifecycleScope.launch(Dispatchers.IO) {
-      runCatching { MpvDiskCache.trimIfNeeded(this@PlayerActivity, diskCacheLimitMb) }
-    }
+    // Disk cleanup must never run while the current demuxer cache is open.
     setIntentExtras(intent.extras)
     // Initial playback and native queue selection converge here; automatic matching is idempotent per load.
     notifyDanmakuEpisodeChanged(playlistIndex)
@@ -3500,43 +3513,30 @@ private fun cancelAutoplayCountdown() {
 
   // ==================== Orientation Management ====================
 
-  /** Safe before mpv initialization: retain the physical orientation without enabling sensors. */
+  /** Safe before native initialization: start in fixed landscape rather than the app's portrait. */
   private fun setOrientation() {
-    applyMpvOrientation(
-      when (val state = orientationState) {
-        is PlayerOrientationLock.Automatic -> state.orientation
-        is PlayerOrientationLock.Manual -> state.orientation
-        PlayerOrientationLock.WaitingForVideo -> AppOrientationPolicy.MPV
-      },
-    )
+    applyMpvOrientation(orientationState.orientation)
   }
 
-  private fun resetAutomaticOrientationForFile() {
-    if (orientationState !is PlayerOrientationLock.Manual) {
-      orientationState = PlayerOrientationLock.WaitingForVideo
-      applyMpvOrientation(AppOrientationPolicy.MPV)
-    }
+  private fun prepareOrientationForFile(identity: String) {
+    updateOrientation(orientationState.prepareFile(identity))
+  }
+
+  private fun updateOrientation(state: PlayerOrientationState) {
+    val changed = state.orientation != orientationState.orientation
+    orientationState = state
+    if (changed && !isInPictureInPictureMode && !isFinishing && !isDestroyed) setOrientation()
   }
 
   private fun lockOrientationFromVideo() {
-    if (orientationState !is PlayerOrientationLock.WaitingForVideo || isInPictureInPictureMode) return
-    val orientation = AppOrientationPolicy.orientationForVideo(currentVideoAspect()) ?: return
-    orientationState = PlayerOrientationLock.Automatic(orientation)
-    applyMpvOrientation(orientation)
+    if (!orientationState.nativeReady) return
+    val identity = playbackUrl ?: return
+    if (!loopback.ownsMediaUrl(identity, PlayerLib.getPropertyString("path"))) return
+    updateOrientation(orientationState.nativeAspect(identity, currentVideoAspect()))
   }
 
   override fun rotatePlayerScreen() {
-    val current = when (val state = orientationState) {
-      is PlayerOrientationLock.Automatic -> state.orientation
-      is PlayerOrientationLock.Manual -> state.orientation
-      PlayerOrientationLock.WaitingForVideo -> when (resources.configuration.orientation) {
-        Configuration.ORIENTATION_LANDSCAPE -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-        else -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-      }
-    }
-    val rotated = AppOrientationPolicy.rotatedOrientation(current)
-    orientationState = PlayerOrientationLock.Manual(rotated)
-    applyMpvOrientation(rotated)
+    updateOrientation(orientationState.rotate())
   }
 
   private fun applyMpvOrientation(orientation: Int) {
@@ -4195,7 +4195,7 @@ private fun cancelAutoplayCountdown() {
     private const val MAX_DURATION_PROBES = 3
 
     /**
-     * 判「时长离谱」的倍数（v179）：声称的时长超过
+     * 判「时长离谱」的倍数：声称的时长超过
      * `file-size × 8 ÷ 码率`（这份文件物理上能装下的时长）这么多倍，就不是估算误差。
      *
      * 取 8 而不是 2、4：`video-bitrate` 在 VBR 片源上报的可能是**瞬时峰值**，
@@ -4230,86 +4230,59 @@ private fun cancelAutoplayCountdown() {
   }
 }
 
-/**
- * 「出画面前」的加载层：从进入播放器到首帧真正上屏之间显示加载动画。
- *
- * 之前这段只有一片黑（视频 Surface 已创建但还没有内容），用户分不清是在加载还是卡死了。
- *
- * ## 判据为什么是 `MPV_EVENT_PLAYBACK_RESTART` 而不是 mpv 的 `vo-configured`
- *
- * mpv 文档对 `vo-configured` 的定义是「VO 是否已配置好，通常对应视频窗口是否可见」，
- * 听起来正好合适 —— 但它在 `vo_reconfig2()` 返回时就为 yes，**早于第一帧 `flip_page`**。
- * 拿它当判据 = 加载动画先消失、再黑一下、画面才浮现，**比不显示更难看**。
- * `PLAYBACK_RESTART` 在日志顺序上排在 `first video frame after restart shown` 之后。
- *
- * 这与视界流那条踩过的坑是同一个（见 `FeedViewModel.buffered` 的注释：
- * 判据早一步就会「转圈消失 → 黑屏 → 画面浮现」）。
- *
- * ## 为什么淡出而不是硬切
- *
- * 硬切的话，哪怕只差一两个 vsync 也会被看成「闪了一下」。
- * 淡出期间画面从动画背后浮上来，观感上就是无缝衔接。
- *
- * ⚠️ 必须是**顶层函数**（放在类的右花括号之外），不是类的方法 ——
- *   写在 `companion object` 里的话，普通 `private fun` 拿不到 `@Composable` 的
- *   调用环境，编译会报一串「@Composable invocations can only happen from…」。
- */
+/** Startup/cache loading stays independent of controls and never fabricates a percentage. */
 @OptIn(ExperimentalAnimationApi::class)
 @Composable
-private fun PlayerFirstFrameLoading(
+private fun PlayerLoadingOverlay(
   viewModel: PlayerViewModel,
   modifier: Modifier = Modifier,
 ) {
-  // ⚠️ 不能从 ViewModel 拿偏好：`PlayerViewModel.playerPreferences` 是 **private**
-  //   （PlayerViewModel.kt:87）。这里自己注入一份 —— 偏好是 Koin 单例，读的是同一个值
-  //   （PlayerControls.kt:858 也是就地注入后读的）。
   val playerPrefs = koinInject<PlayerPreferences>()
-  // ⚠️ 三个同名 `collectAsState`（红线 38）：
-  //   ① Compose 的 `StateFlow.collectAsState(initial)`（本文件顶部 import 的就是它，
-  //      上面 `firstFrameRendered` 用的这个）；
-  //   ② 本项目的 `Flow.collectAsState(scope, initial)`（返回 T?，PlayerViewModel.kt:2232）；
-  //   ③ 本项目的 `Preference<T>.collectAsState()`（**无参**扩展，
-  //      preferences/preference/Preference.kt:43）—— `showLoadingCircle` 是
-  //      `Preference<Boolean>`，要的是这个。
-  //    同文件 import 两个同名函数不冲突：靠接收者类型重载分辨
-  //    （MainActivity.kt:35+59 同时 import 了两个，同样用法）。
   val showLoadingCircle by playerPrefs.showLoadingCircle.collectAsState()
-
-  val firstFrameRendered by viewModel.firstFrameRendered.collectAsState()
+  val loading by viewModel.loadingState.collectAsState()
+  val percent = loading.percent
 
   if (!showLoadingCircle) return
 
   AnimatedVisibility(
-    visible = !firstFrameRendered,
+    visible = loading.visible,
     enter = fadeIn(tween(120)),
     exit = fadeOut(tween(260)),
     modifier = modifier,
   ) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-      // 96dp 是**基准**尺寸（还会乘用户设的缩放系数，默认 1.1×）—— 与缓冲转圈
-      // （PlayerControls.kt:866）同基准 ⇒ 首帧层与缓冲层接力时画面不跳。
-      // ⚠️ 用 size 参数而不是 Modifier.size，否则「加载动画大小」缩放对它不生效。
-      // 压在画面上，所以固定白色半透明（主题色在视频上基本看不见）。
-      app.marlboroadvance.mpvex.ui.theme.AppLoadingIndicator(
-        size = 96.dp,
-        tint = Color.White.copy(alpha = 0.85f),
-      )
-      // ── 文字提示（原来只有转圈）──
-      // 只有动画时用户分不清「在加载」和「卡死了」，尤其网络播放要等好几秒。
-      // 第二行是**兜底说明**：死链在起播前已被拦掉（见 EmbyClient.resolveStreamUrl），
-      // 但「地址有效却极慢」还是会长时间停在这一屏，得给用户一句能对应上的话。
+      if (percent == null) {
+        app.marlboroadvance.mpvex.ui.theme.AppLoadingIndicator(
+          size = 96.dp,
+          tint = Color.White.copy(alpha = 0.85f),
+        )
+      } else {
+        val scale = app.marlboroadvance.mpvex.ui.theme.rememberLoadingAnimationScale()
+        CircularProgressIndicator(
+          progress = { percent / 100f },
+          modifier = Modifier.size(96.dp * scale),
+          color = Color.White.copy(alpha = 0.85f),
+          trackColor = Color.White.copy(alpha = 0.15f),
+        )
+      }
       Spacer(Modifier.height(14.dp))
       Text(
-        text = "正在加载…",
+        text = when {
+          percent != null -> stringResource(app.marlboroadvance.mpvex.R.string.player_buffering_progress, percent)
+          loading.awaitingFirstFrame -> "正在加载…"
+          else -> stringResource(app.marlboroadvance.mpvex.R.string.player_buffering)
+        },
         color = Color.White.copy(alpha = 0.75f),
         fontSize = 13.sp,
       )
-      Spacer(Modifier.height(4.dp))
-      Text(
-        text = "若长时间停在这里，可能是网络不稳或直链已过期",
-        color = Color.White.copy(alpha = 0.42f),
-        fontSize = 11.sp,
-      )
+      if (loading.awaitingFirstFrame) {
+        Spacer(Modifier.height(4.dp))
+        Text(
+          text = "若长时间停在这里，可能是网络不稳或直链已过期",
+          color = Color.White.copy(alpha = 0.42f),
+          fontSize = 11.sp,
+        )
+      }
     }
   }
 }

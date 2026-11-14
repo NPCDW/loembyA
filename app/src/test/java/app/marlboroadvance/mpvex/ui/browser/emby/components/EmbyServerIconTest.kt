@@ -1,6 +1,8 @@
 package app.marlboroadvance.mpvex.ui.browser.emby.components
 
 import app.marlboroadvance.mpvex.domain.emby.EmbyServer
+import app.marlboroadvance.mpvex.domain.postgres.PostgresSourceToken
+import app.marlboroadvance.mpvex.domain.postgres.appNetworkConfigurationForTest
 import coil3.request.CachePolicy
 import java.util.Base64
 import org.junit.Assert.*
@@ -132,6 +134,65 @@ class EmbyServerIconTest {
     assertNull(request.url.queryParameter("api_key"))
     assertEquals("2", request.url.queryParameter("v"))
     assertThrows(IllegalArgumentException::class.java) { EmbyServerIconLoader.publicRequest(data(png)) }
+  }
+
+  @Test fun publicIconAppRouteIsIdempotentUntaggedAndDoesNotBorrowEmbyRow() {
+    val app = appNetworkConfigurationForTest(
+      mapOf("app_reverse_proxy_id" to "app-route"),
+      PostgresSourceToken("source-a", 2), mapOf("app-route" to "https://app-relay.test/gateway"),
+    )
+    val original = "https://cdn.test/icon%2F.png?q=a%2Bb"
+    val expected = "https://app-relay.test/gateway/$original"
+    listOf(original, expected).forEach { url ->
+      val request = EmbyServerIconLoader.publicRequest(url, app)
+      assertEquals(expected, request.url.toString())
+      assertNull(request.tag(EmbyServer::class.java))
+      assertNull(request.header("X-Emby-Token"))
+      assertNull(request.header("X-Emby-Device-Id"))
+      assertNull(request.header("Authorization"))
+      assertNull(request.header("Cookie"))
+    }
+    // A public redirect onto this origin stays public and routed by app, not by the selected row.
+    assertEquals("https://app-relay.test/gateway/https://emby.test/icon.png",
+      app.resolveRedirect(expected, "https://emby.test/icon.png"))
+    assertEquals("https://emby.test/emby/icon.png",
+      EmbyServerIconLoader.iconRequest("https://emby.test/icon.png", server()).url.toString())
+  }
+
+  @Test fun publicIconCacheAndOwnershipTrackSourceRevisionAndAppRouteNotRowCredentials() {
+    val source = PostgresSourceToken("source-a", 2)
+    val app = appNetworkConfigurationForTest(source = source)
+    val key = EmbyServerIconLoader.cacheKey("source-a", "https://cdn.test/icon.png", app = app)
+    val changed = appNetworkConfigurationForTest(
+      mapOf("app_reverse_proxy_id" to "route"), source, mapOf("route" to "https://relay.test/r/"),
+    )
+    assertNotEquals(key, EmbyServerIconLoader.cacheKey("source-a", "https://cdn.test/icon.png", app = changed))
+    assertNotEquals(key, EmbyServerIconLoader.cacheKey("source-a", "https://cdn.test/icon.png", app =
+      appNetworkConfigurationForTest(source = source.copy(revision = 3))))
+    assertTrue(EmbyServerIconLoader.ownerMatches("source-a", server(), app))
+    assertFalse(EmbyServerIconLoader.ownerMatches("source-b", server(), app))
+    assertFalse(EmbyServerIconLoader.ownerMatches("source-a", server().copy(sourceRevision = 3), app))
+    assertTrue(EmbyServerIconLoader.ownerMatches("source-a", null, app))
+    assertFalse(EmbyServerIconData("https://cdn.test/secret", key, app = app).toString().contains("secret"))
+  }
+
+  @Test fun iconOwnershipSeparatesLocalPublicAndOwnRowBeforeConfigurationReads() {
+    val row = server()
+    assertEquals(EmbyServerIconLoader.Ownership.LOCAL, EmbyServerIconLoader.ownership(data(png), row))
+    assertEquals(EmbyServerIconLoader.Ownership.LOCAL, EmbyServerIconLoader.ownership(data(png), null))
+    assertEquals(EmbyServerIconLoader.Ownership.PUBLIC,
+      EmbyServerIconLoader.ownership("https://cdn.test/icon.png", row.copy(sourceRevision = 999)))
+    assertEquals(EmbyServerIconLoader.Ownership.PUBLIC,
+      EmbyServerIconLoader.ownership("https://cdn.test/icon.png", null))
+    assertEquals(EmbyServerIconLoader.Ownership.EMBY,
+      EmbyServerIconLoader.ownership("https://emby.test/icon.png", row))
+  }
+
+  @Test fun invalidSelectedAppRouteCannotFallBackToDirectPublicIcon() {
+    val app = appNetworkConfigurationForTest(mapOf("app_reverse_proxy_id" to "missing"))
+    assertThrows(IllegalStateException::class.java) {
+      EmbyServerIconLoader.publicRequest("https://cdn.test/icon.png", app)
+    }
   }
 
   @Test fun remoteDecodedMemoryCannotBypassTtlButLocalDataRemainsLocal() {

@@ -189,9 +189,7 @@ class LoopbackPlaybackServer internal constructor(
     // Launch every external subtitle against the pre-play indices before exposing the video redirect.
     for (stream in source.MediaStreams.orEmpty()) if (stream.Type == "Subtitle" && stream.IsExternal == true) {
       val half = LoembyMediaSelection.halfSubtitleStreamUrl(spec.itemId, source, stream)
-      subtitleCache.precache(scope, server, initialUrl(server, half), invalidCerts(config)) {
-        mutableErrors.tryEmit(PlaybackNetworkError(503, "字幕预缓存失败"))
-      }
+      subtitleCache.precache(scope, server, initialUrl(server, half), invalidCerts(config))
     }
     current(server) // Reject late results from invalidated credential/source snapshots.
     val video = registerRequest(server, upstream, "video", key, subtitle = false)

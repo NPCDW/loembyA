@@ -47,8 +47,20 @@ class FixedPlayerControlsContractTest {
     assertTrue(viewModel.contains("_cacheTimelineNode.value = null"))
     assertTrue(controls.contains("cacheTimeline = cacheTimeline"))
     assertTrue(controls.contains("CachedTimelineCanvas("))
-    assertTrue(seekbar.contains("timeline.cachedRanges.forEach"))
+    assertTrue(viewModel.contains("_cacheTimelineNode.value = node"))
+    assertTrue(seekbar.contains("timeline.cachedRanges.filter"))
+    assertTrue(seekbar.contains("TimelineIntervalKind.PlayedCached"))
     assertFalse(seekbar.contains("PlayerLib.propNode[\"demuxer-cache-state\"]"))
+  }
+
+  @Test
+  fun `file loaded resets state before restoration can request unpause`() {
+    val activity = source("app/marlboroadvance/mpvex/ui/player/PlayerActivity.kt")
+    val loaded = activity.indexOf("MPVLib.MpvEvent.MPV_EVENT_FILE_LOADED ->")
+    val restarted = activity.indexOf("MPVLib.MpvEvent.MPV_EVENT_PLAYBACK_RESTART ->", loaded)
+    val block = activity.substring(loaded, restarted)
+    assertTrue(block.indexOf("viewModel.onLoadingNewFile()") < block.indexOf("handleFileLoaded()"))
+    assertTrue(block.indexOf("viewModel.onLoadingNewFile()") >= 0)
   }
 
   @Test

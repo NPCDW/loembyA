@@ -110,6 +110,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import app.marlboroadvance.mpvex.domain.emby.EmbyItem
@@ -252,10 +253,12 @@ data class EmbyDetailScreen(
         }
       }
         .onSuccess {
+          kotlinx.coroutines.currentCoroutineContext().ensureActive()
           item = it
           error = null
         }
         .onFailure {
+          if (it is kotlinx.coroutines.CancellationException) throw it
           if (!hadItem) {
             item = null
             error = it.message ?: "加载详情失败"
@@ -287,13 +290,16 @@ data class EmbyDetailScreen(
     // 不刷新的话进度条就停在进来之前的旧值。延迟 800ms 等上报先落库再拉。
     val detailLifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
     androidx.compose.runtime.DisposableEffect(detailLifecycleOwner, itemId) {
-      var initialResume = true
+      var initialResume = detailLifecycleOwner.lifecycle.currentState
+        .isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)
+      var resumeRefresh: kotlinx.coroutines.Job? = null
       val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
         if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
           if (initialResume) {
             initialResume = false
           } else if (item != null) {
-            scope.launch {
+            resumeRefresh?.cancel()
+            resumeRefresh = scope.launch {
               kotlinx.coroutines.delay(800)
               load(force = true)
             }
@@ -301,7 +307,10 @@ data class EmbyDetailScreen(
         }
       }
       detailLifecycleOwner.lifecycle.addObserver(observer)
-      onDispose { detailLifecycleOwner.lifecycle.removeObserver(observer) }
+      onDispose {
+        resumeRefresh?.cancel()
+        detailLifecycleOwner.lifecycle.removeObserver(observer)
+      }
     }
 
     // ── 折叠头部的状态（提到这里是因为「下拉刷新」要用到它）──
@@ -431,6 +440,7 @@ data class EmbyDetailScreen(
               item = current,
               server = currentServer,
               viewModel = viewModel,
+              detailEntryId = detailEntryId,
               onBack = { backStack.removeLastOrNull() },
               onOpenEpisode = replaceEpisode,
               onOpenSeries = { series -> series.Id?.let { pushChild(EmbyDetailScreen(it, series.Name.orEmpty())) } },

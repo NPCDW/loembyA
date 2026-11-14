@@ -37,6 +37,7 @@ import org.brotli.dec.BrotliInputStream
 /** Independent loemby pool. No EmbyHttp interceptor, URL rewrite, proxy selection or implicit global session. */
 class LoopbackHttpPool {
   enum class Kind { STREAM, IMAGE, API }
+  enum class RedirectPolicy { EXISTING, NONE }
   private data class Key(val kind: Kind, val invalidCerts: Boolean)
   private val clients = ConcurrentHashMap<Key, OkHttpClient>()
 
@@ -87,6 +88,7 @@ class LoopbackHttpPool {
     headers: Map<String, String> = emptyMap(),
     dangerAcceptInvalidCerts: Boolean = false,
     retry: Boolean = true,
+    redirectPolicy: RedirectPolicy = RedirectPolicy.EXISTING,
   ): Response {
     val builder = Request.Builder().url(url)
     builder.header("Accept-Encoding", "deflate, gzip, br, zstd")
@@ -105,7 +107,8 @@ class LoopbackHttpPool {
         if (retry && response.code in TRANSIENT_STATUS && attempt < 3) {
           response.close()
         } else {
-          if (kind == Kind.STREAM || response.code !in setOf(301, 302, 303, 307, 308)) return response
+          if (redirectPolicy == RedirectPolicy.NONE || kind == Kind.STREAM ||
+            response.code !in setOf(301, 302, 303, 307, 308)) return response
           val location = response.header("Location") ?: return response
           val next = response.request.url.resolve(location) ?: return response
           if (redirects >= 10) {

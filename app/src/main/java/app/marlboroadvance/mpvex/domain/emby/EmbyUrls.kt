@@ -1,6 +1,94 @@
 package app.marlboroadvance.mpvex.domain.emby
 
+import java.net.URI
+import java.security.MessageDigest
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+
+/** A typed reverse-prefix selection. An invalid selected row is blocked, never a direct-route fallback. */
+class ReverseProxyRoute private constructor(
+  val state: State,
+  private val selection: String,
+  private val prefix: String?,
+) {
+  enum class State { DIRECT, REVERSE, BLOCKED }
+
+  /** Opaque process/cache identity; neither endpoints nor row identifiers are rendered. */
+  val fingerprint: String = MessageDigest.getInstance("SHA-256")
+    .digest(listOf(state.name, selection, prefix.orEmpty()).joinToString("") { "${it.length}:$it" }
+      .toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
+
+  fun resolveUrl(targetUrl: String): String {
+    check(state != State.BLOCKED) { "Reverse route unavailable" }
+    require(validHttpTarget(targetUrl)) { "Unsupported network target" }
+    return applyReverseProxyUrl(targetUrl, prefix)
+  }
+
+  /** Resolve relative locations against the original target, then route exactly once (including other origins). */
+  fun resolveRedirect(requestUrl: String, location: String): String {
+    check(state != State.BLOCKED) { "Reverse route unavailable" }
+    if (prefix != null && reverseTarget(location, prefix) != null) return resolveUrl(location)
+    val original = prefix?.let { reverseTarget(requestUrl, it) } ?: requestUrl
+    require(validHttpTarget(original)) { "Unsupported network target" }
+    val target = try {
+      when {
+        location.isEmpty() -> original
+        location.startsWith('?') -> original.substringBefore('#').substringBefore('?') + location
+        location.startsWith('#') -> original.substringBefore('#') + location
+        else -> URI(original).resolve(location).toString()
+      }
+    } catch (_: Exception) {
+      throw IllegalArgumentException("Unsupported redirect target")
+    }
+    return resolveUrl(target)
+  }
+
+  override fun toString(): String = "ReverseProxyRoute(state=$state, selection=[redacted], endpoint=[redacted])"
+
+  companion object {
+    val DIRECT: ReverseProxyRoute = ReverseProxyRoute(State.DIRECT, "no", null)
+
+    internal fun selected(id: String?, url: String?): ReverseProxyRoute {
+      if (id.isNullOrEmpty() || id == "no") return DIRECT
+      val prefix = url?.trim()?.takeIf {
+        validHttpTarget(it) && URI(it).rawQuery == null && URI(it).rawFragment == null
+      }?.let {
+        runCatching { normalizeReverseProxyUrl(it) }.getOrNull()
+      }
+      return ReverseProxyRoute(if (prefix == null) State.BLOCKED else State.REVERSE, id, prefix)
+    }
+  }
+}
+
+private const val MAX_URL_LENGTH = 8192
+
+private fun validHttpTarget(value: String): Boolean = value.length <= MAX_URL_LENGTH && runCatching {
+  val uri = URI(value)
+  uri.scheme?.lowercase() in setOf("http", "https") && !uri.host.isNullOrBlank() &&
+    uri.rawUserInfo == null && uri.port in -1..65535 && uri.port != 0
+}.getOrDefault(false)
+
+/** Match normalized authorities too: OkHttp canonicalizes case/default ports between requests and responses. */
+private fun reverseTarget(value: String, prefix: String): String? {
+  if (value.startsWith(prefix)) return value.removePrefix(prefix)
+  val configured = prefix.toHttpUrlOrNull() ?: return null
+  val target = value.toHttpUrlOrNull() ?: return null
+  if (configured.scheme != target.scheme || configured.host != target.host || configured.port != target.port) return null
+  val pathPrefix = configured.encodedPath
+  if (!target.encodedPath.startsWith(pathPrefix)) return null
+  val uri = runCatching { URI(value) }.getOrNull() ?: return null
+  val path = uri.rawPath?.takeIf { it.startsWith(pathPrefix) } ?: return null
+  return path.removePrefix(pathPrefix) + (uri.rawQuery?.let { "?$it" } ?: "") +
+    (uri.rawFragment?.let { "#$it" } ?: "")
+}
+
+/** Latest loemby apply_reverse_proxy_url: preserve raw encoding and never duplicate an existing prefix. */
+internal fun applyReverseProxyUrl(targetUrl: String, reverseProxyUrl: String?): String {
+  val prefix = reverseProxyUrl?.trim()?.takeIf { it.isNotEmpty() }?.let {
+    if (it.endsWith('/')) it else "$it/"
+  } ?: return targetUrl
+  if (reverseTarget(targetUrl, prefix) != null || !validHttpTarget(targetUrl)) return targetUrl
+  return prefix + targetUrl
+}
 
 /** Immutable URL value. No persisted alternate endpoints, network probes or automatic switching. */
 data class EmbyEndpoint(

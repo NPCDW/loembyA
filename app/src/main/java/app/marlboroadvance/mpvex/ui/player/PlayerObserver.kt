@@ -7,7 +7,7 @@ import android.util.Log
 /**
  * mpv 事件/属性回调 → `PlayerActivity` 的分发层。
  *
- * ## ⚠️ 为什么每一次分发都必须吞掉异常（v190）
+ * ## 为什么每一次分发都必须吞掉异常
  *
  * 这些回调由 **libmpv 的 native 线程经 JNI 调到 Java**。这里（以及被
  * `runOnUiThread` 投递到主线程的那个 lambda）抛出的任何异常都会变成

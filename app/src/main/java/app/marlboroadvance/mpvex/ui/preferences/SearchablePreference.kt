@@ -15,7 +15,7 @@ data class SearchablePreference(
     val summary: String? = null,
     val keywords: List<String> = emptyList(),
     /**
-     * 页面级别名（v172）：挂在「该页第一条」上，检索时算**最低权重**。
+     * 页面级别名：挂在「该页第一条」上，检索时算**最低权重**。
      *
      * 用途：用户搜「弹幕」时，除了命中标题里带「弹幕」的那几项，也把整页的其它
      * 弹幕配置一起带出来（它们标题里往往没有「弹幕」二字）。权重压到最低是为了
@@ -29,9 +29,9 @@ data class SearchablePreference(
 /**
  * All searchable preferences indexed for settings search.
  *
- * v172 起 = 下面这张**手写清单**（带英文关键词）+ [generatedSearchablePreferences]
- * （从各设置页源码自动抽取的全量清单，200+ 项）。合并时手写优先 —— 它多了
- * amoled / vulkan / danmaku 这类英文别名，是搜英文的唯一来源。
+ * 索引由下面的手写清单（带英文关键词）与 [generatedSearchablePreferences] 合并，
+ * 后者从各设置页源码自动抽取。合并时手写优先，以保留
+ * amoled / vulkan / danmaku 这类英文别名。
  */
 object SearchablePreferences {
     /** 手写清单：带英文关键词的那一份（搜英文靠它）。 */
@@ -488,7 +488,7 @@ object SearchablePreferences {
     /**
      * Search preferences by query.
      *
-     * 匹配规则（v172 重写）：
+     * 匹配规则：
      *  - 查询按空白 / 中英文逗号 / 顿号切成多个词，**每个词都命中**才算结果（AND），
      *    这样「emby 随机」这种组合词才收得紧；
      *  - 词可以落在标题、副标题、英文关键词、分类名、页面别名上，按命中位置给权重，

@@ -29,20 +29,14 @@ import dev.chrisbanes.haze.rememberHazeState
  *    因为 M3 组件（BottomSheet / AlertDialog）内部读的是 `MaterialTheme.typography`，
  *    不覆盖它们会按 M3 默认字阶渲染，和周围 Cine 文字差一号。
  *
- * ## 为什么这里**要**重新提供 colorScheme（v132 改口）
- * v126 的写法是不动色相、只加语义层，理由是「换主题时两套界面质感要连着」。
- * 实测下来这条在**动态取色**下是错的：动态取色的 `surface` 会被壁纸染成淡紫 / 灰绿，
- * 且 `surface` 与 `surfaceContainer*` 的明度差被压得很平 —— 设计稿那套
- * 「近黑底 + 四档容器层级」的观感直接消失，用户看到的就是「发灰、发平」。
- * 现在改成：中性阶梯（surface / onSurface / outline）取设计稿定值，
- * **primary / tertiary / error 仍然跟随用户主题** —— 强调色还是他的，
- * 只是底色不再被壁纸污染。详见 `cineColorScheme` 的说明。
+ * ## 中性底色与用户强调色
+ * 动态取色会给 `surface` 染色并压平容器明度差，因此 surface / onSurface / outline
+ * 使用设计稿的中性阶梯；primary / tertiary / error 仍跟随用户主题。
+ * 详见 `cineColorScheme`。
  *
- * ## ⚠️ 老页面落在 Cine 子树里怎么办
- * `MaterialTheme` 的 typography / colorScheme 覆盖会顺带作用于**回落进 Cine 外壳的
- * Classic 页面**。但 v130 之后 `CineTheme` 已经收进 `CineRoute` 的 Cine 分支里，
- * 回落分支（`fallback()`）**不包 CineTheme**，所以 Classic 页面根本拿不到这套覆盖 ——
- * 老 UI 一个像素都不变。
+ * ## Classic 回落隔离
+ * `CineRoute` 只在 Cine 分支提供此主题；`fallback()` 不包 `CineTheme`，
+ * Classic 页面不会继承这里的 typography / colorScheme 覆盖。
  */
 @Composable
 fun CineTheme(content: @Composable () -> Unit) {

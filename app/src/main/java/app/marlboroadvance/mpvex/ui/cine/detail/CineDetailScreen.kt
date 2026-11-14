@@ -105,7 +105,7 @@ import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 
 /**
- * Cine 详情页（v134 版式）：剧照 + 居中信息块 + 横滑分集。
+ * Cine 详情页：剧照 + 居中信息块 + 横滑分集。
  *
  * ## 版式来源与本地化取舍
  * 信息结构与主流流媒体客户端的详情页对齐（剧照渐隐 → 评分 → 规格 → 类型 →
@@ -188,10 +188,12 @@ fun CineDetailScreen(
       }
     }
       .onSuccess {
+        currentCoroutineContext().ensureActive()
         item = it
         error = null
       }
       .onFailure {
+        if (it is CancellationException) throw it
         if (!hadItem) {
           item = null
           episodes = emptyList()
@@ -261,13 +263,15 @@ fun CineDetailScreen(
   // 从播放器返回：进度是异步上报的，延迟 800ms 等落库再拉，否则进度条停在旧值
   val lifecycleOwner = LocalLifecycleOwner.current
   DisposableEffect(lifecycleOwner, itemId) {
-    var initialResume = true
+    var initialResume = lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
+    var resumeRefresh: kotlinx.coroutines.Job? = null
     val observer = LifecycleEventObserver { _, event ->
       if (event == Lifecycle.Event.ON_RESUME) {
         if (initialResume) {
           initialResume = false
         } else if (item != null) {
-          scope.launch {
+          resumeRefresh?.cancel()
+          resumeRefresh = scope.launch {
             delay(800)
             load(force = true)
           }
@@ -275,7 +279,10 @@ fun CineDetailScreen(
       }
     }
     lifecycleOwner.lifecycle.addObserver(observer)
-    onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    onDispose {
+      resumeRefresh?.cancel()
+      lifecycleOwner.lifecycle.removeObserver(observer)
+    }
   }
 
   val mediaUi: CineMediaUi? = remember(server, item, overrideTick) {
@@ -425,6 +432,7 @@ fun CineDetailScreen(
               item = loaded,
               server = currentServer,
               viewModel = viewModel,
+              detailEntryId = detailEntryId,
               modifier = Modifier,
               onBack = { backStack.removeLastOrNull() },
               onOpenEpisode = replaceEpisode,

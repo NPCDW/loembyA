@@ -2,7 +2,7 @@
 
 **Effective Date:** September 27, 2026  
 **Application Name:** loembyA<br>
-**Package Name:** `app.cineisle.player`<br>
+**Package Name:** `com.github.npcdw.loembya` (release), `com.github.npcdw.loembya.debug` (debug), `com.github.npcdw.loembya.preview` (preview)<br>
 **Upstream Historical Privacy Policy (mpvEx):** [https://marlboro-advance.github.io/mpvEx/privacy-policy.html](https://marlboro-advance.github.io/mpvEx/privacy-policy.html) — This upstream historical policy does not represent the privacy policy of this loembyA fork.<br>
 **License:** Apache License 2.0  
 
@@ -10,9 +10,9 @@
 
 ## 🔒 Summary (TL;DR)
 
-- **Zero Data Collection:** We do not collect, transmit, store, sell, or share any personal information.
+- **No Developer Telemetry:** The application does not automatically send analytics or crash reports to the loembyA developers. Normal operation exchanges configuration, media metadata and playback reports with your configured PostgreSQL, Emby and enabled tracking services.
 - **No Ads & No Analytics:** The application contains zero advertising SDKs, zero analytics tracking (no Google/Firebase Analytics), and zero telemetry.
-- **Local Processing:** All media discovery, playback history, thumbnails, and settings remain 100% on your device.
+- **Data Ownership:** Room stores local playback state, Emby identity mappings and search history. Shared server configuration and playback history belong to your configured PostgreSQL database; enabled Trakt, Simkl and YamTrack services receive playback metadata.
 - **100% Open Source:** loembyA is free and open-source software. Its direct upstream is [CineIsle](https://github.com/nu1lkali/CineIsle), built on the earlier [mpvEx](https://github.com/marlboro-advance/mpvEx) project.
 
 ---
@@ -21,7 +21,7 @@
 
 loembyA ("the Application", "we", "us", or "our") is an open-source media player for Android built upon the `libmpv` playback engine. We are committed to maintaining the highest privacy standards. This Privacy Policy describes how loembyA handles information on Android devices.
 
-Because loembyA operates as a client-side Emby media player utility, we do not operate user accounts, remote user databases, or data tracking services.
+The developers do not operate user databases or tracking services for the application. You configure access to your own shared PostgreSQL/Emby services and may enable third-party playback tracking.
 
 ---
 
@@ -55,21 +55,23 @@ You may grant or revoke permissions at any time via Android System Settings (**S
 
 ## 4. Local Data Storage & User Data Control
 
-All app-related data is stored locally on your device:
+Local app data and shared service data are separate:
 
-- **Playback History & Positions:** Saved in a local SQLite/Room database on your device to let you resume playback where you left off.
-- **App Preferences:** Playback speed, gestures, subtitle preferences, and mpv configuration scripts are saved in Android DataStore/SharedPreferences.
-- **Data Deletion:** You can clear your playback history at any time in the app settings, or clear all application data via Android System Settings (**Settings > Apps > loembyA > Storage > Clear Data**). Uninstalling the app permanently deletes all local data.
+- **Local State:** Room stores playback state, server identity mappings and search history. PostgreSQL connection configuration is encrypted with Android Keystore AES-GCM in `noBackupFilesDir`.
+- **Shared State:** Server configuration and shared playback history remain in your PostgreSQL database. Android writes only the typed automatic playback/history synchronization and compare-and-set history mark operations.
+- **App Preferences:** UI, playback and subtitle preferences use local preference storage; runtime cache budgets and selected service reverse routes are read from shared configuration.
+- **Data Deletion:** Clearing Android application data or uninstalling removes local state, not shared PostgreSQL records or third-party tracking history.
 
 ---
 
 ## 5. Network Streaming & Third-Party Services
 
-When you stream media from an Emby server or its associated HTTP(S) media source:
-- loembyA establishes a direct network connection from your device to the specified server.
-- No intermediary proxy or logging servers are operated by loembyA.
-- The connection is governed by the privacy policy of the respective streaming host.
-- Any network credentials entered are stored encrypted/locally on your device and sent only to the host you specified.
+When you use your configured services:
+- Emby requests use the bound server and its selected reverse route. Public icons, application updates, Trakt, Simkl and YamTrack can each use the shared reverse-route selections supported by loemby.
+- A selected reverse proxy receives the requests routed through it, including the authentication headers or webhook destination needed by that service. Use only trusted reverse proxies.
+- loembyA does not operate intermediary proxy or analytics servers. Normal forward-proxy configuration and its credentials are not read by Android.
+- Playback session reports go to Emby; allowlisted history updates go to your PostgreSQL database. Enabled tracking services receive media identifiers and playback progress.
+- Requests use the configured TLS policy. `danger_accept_invalid_certs` disables certificate/hostname checks and should be enabled only with informed consent.
 
 ---
 

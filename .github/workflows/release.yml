@@ -105,8 +105,10 @@ jobs:
           sdkmanager --sdk_root="$ANDROID_HOME" \
             'platforms;android-37.0' 'build-tools;36.0.0' 'platform-tools'
 
-      - name: Build standard ARM64 release
-        run: sh "$GITHUB_WORKSPACE/gradlew" -p "$GITHUB_WORKSPACE" :app:assembleStandardRelease -Pabi=arm64-v8a
+      - name: Build unsigned standard ARM64 release intermediate
+        run: >-
+          sh "$GITHUB_WORKSPACE/gradlew" -p "$GITHUB_WORKSPACE" :app:assembleStandardRelease
+          -Pabi=arm64-v8a -PexternalReleaseSigning=true
 
       - name: Sign and verify release APK
         env:
@@ -165,6 +167,7 @@ jobs:
             printf 'RELEASE_DIR=%s\n' "$release_dir"
             printf 'APK_SHA256=%s\n' "$checksum"
           } >> "$GITHUB_ENV"
+          printf 'Verified signed release APK: %s (signature, alignment, package, version and ARM64 ABI checks passed)\n' "$APK_FILENAME"
 
       - name: Create GitHub Release draft
         uses: softprops/action-gh-release@v2

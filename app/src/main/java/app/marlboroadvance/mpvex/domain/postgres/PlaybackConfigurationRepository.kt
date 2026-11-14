@@ -1,6 +1,8 @@
 package app.marlboroadvance.mpvex.domain.postgres
 
 import app.marlboroadvance.mpvex.domain.emby.EmbyServer
+import app.marlboroadvance.mpvex.domain.emby.ReverseProxyRoute
+import java.security.MessageDigest
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.sql.PreparedStatement
@@ -22,6 +24,10 @@ internal val ANDROID_GLOBAL_CONFIG_ALLOWLIST: Set<String> = linkedSetOf(
   "danger_accept_invalid_certs",
   "subtitleStoredDays",
   "lastCleanSubtitleTime",
+  "app_reverse_proxy_id",
+  "trakt_reverse_proxy_id",
+  "simkl_reverse_proxy_id",
+  "yamtrack_reverse_proxy_id",
   "trakt_sync_switch",
   "trakt_username",
   "trakt_access_token",
@@ -78,9 +84,10 @@ class TraktRuntimeConfiguration internal constructor(
   val refreshToken: String,
   val expiresAtSeconds: Long,
   val redirectUri: String,
+  val reverseRoute: ReverseProxyRoute = ReverseProxyRoute.DIRECT,
 ) {
   internal fun fingerprintInput(): List<String> =
-    listOf(accessToken, refreshToken, expiresAtSeconds.toString(), redirectUri, username)
+    listOf(accessToken, refreshToken, expiresAtSeconds.toString(), redirectUri, username, reverseRoute.fingerprint)
 
   override fun toString(): String =
     "TraktRuntimeConfiguration(enabled=$enabled, credentials=[redacted], endpoint=[redacted])"
@@ -90,18 +97,38 @@ class SimklRuntimeConfiguration internal constructor(
   val enabled: Boolean,
   val username: String,
   val accessToken: String,
+  val reverseRoute: ReverseProxyRoute = ReverseProxyRoute.DIRECT,
 ) {
   override fun toString(): String =
-    "SimklRuntimeConfiguration(enabled=$enabled, credentials=[redacted])"
+    "SimklRuntimeConfiguration(enabled=$enabled, credentials=[redacted], endpoint=[redacted])"
 }
 
 class YamTrackRuntimeConfiguration internal constructor(
   val enabled: Boolean,
   val webhookUrl: String,
+  val reverseRoute: ReverseProxyRoute = ReverseProxyRoute.DIRECT,
 ) {
   override fun toString(): String =
     "YamTrackRuntimeConfiguration(enabled=$enabled, webhook=[redacted])"
 }
+
+/** Public app data, icons and updater share the app key, independently of every Emby row/session. */
+class AppNetworkConfiguration internal constructor(
+  val source: PostgresSourceToken,
+  val reverseRoute: ReverseProxyRoute,
+  val dangerAcceptInvalidCertificates: Boolean,
+) {
+  val fingerprint: String = runtimeFingerprint(
+    source.sourceKey, source.revision.toString(), reverseRoute.fingerprint, dangerAcceptInvalidCertificates.toString(),
+  )
+  fun resolveUrl(originalUrl: String): String = reverseRoute.resolveUrl(originalUrl)
+  fun resolveRedirect(requestUrl: String, location: String): String = reverseRoute.resolveRedirect(requestUrl, location)
+  override fun toString(): String = "AppNetworkConfiguration(source=$source, route=[redacted])"
+}
+
+internal fun runtimeFingerprint(vararg parts: String): String = MessageDigest.getInstance("SHA-256")
+  .digest(parts.joinToString("") { "${it.length}:$it" }.toByteArray(Charsets.UTF_8))
+  .joinToString("") { "%02x".format(it) }
 
 /** Fully typed, process-local runtime configuration. No raw global_config map is exposed. */
 class PlaybackConfiguration internal constructor(
@@ -116,7 +143,14 @@ class PlaybackConfiguration internal constructor(
   val yamTrack: YamTrackRuntimeConfiguration,
   val source: PostgresSourceToken,
   val serverUuid: String,
+  private val serverBindingFingerprint: String = "",
 ) {
+  internal val networkFingerprint: String = runtimeFingerprint(
+    serverBindingFingerprint,
+    *trakt.fingerprintInput().toTypedArray(), trakt.enabled.toString(), simkl.enabled.toString(), simkl.username,
+    simkl.accessToken, simkl.reverseRoute.fingerprint, yamTrack.enabled.toString(), yamTrack.webhookUrl,
+    yamTrack.reverseRoute.fingerprint, dangerAcceptInvalidCertificates.toString(),
+  )
   override fun toString(): String =
     "PlaybackConfiguration(source=$source, serverUuid=$serverUuid, runtime=[redacted], credentials=[redacted])"
 }
@@ -179,11 +213,40 @@ class PlaybackConfigurationRepository(
   private data class Cached(val snapshot: SharedConfigurationRawSnapshot, val loadedAtNanos: Long)
 
   private val mutex = Mutex()
-  private var cache: Cached? = null
+  @Volatile private var cache: Cached? = null
 
   val sourceChanges get() = executor.sourceChanges
   suspend fun currentSource(): PostgresSourceToken = executor.currentSource()
-  fun isCurrent(configuration: PlaybackConfiguration): Boolean = executor.isCurrent(configuration.source)
+  fun isCurrent(configuration: PlaybackConfiguration): Boolean {
+    if (!executor.isCurrent(configuration.source)) return false
+    val cached = cache?.snapshot?.takeIf { it.source == configuration.source } ?: return false
+    return cached.servers.any { it.id == configuration.serverUuid } &&
+      parsePlaybackConfiguration(cached, configuration.serverUuid).networkFingerprint == configuration.networkFingerprint
+  }
+
+  fun isCurrent(configuration: AppNetworkConfiguration): Boolean {
+    if (!executor.isCurrent(configuration.source)) return false
+    val cached = cache?.snapshot?.takeIf { it.source == configuration.source } ?: return false
+    return parseAppNetworkConfiguration(cached).fingerprint == configuration.fingerprint
+  }
+
+  /** Refresh on the normal bounded TTL and reject an old route/credential snapshot before another request. */
+  suspend fun validateCurrent(configuration: PlaybackConfiguration): Boolean {
+    val raw = rawSnapshot(configuration.source)
+    return executor.isCurrent(configuration.source) && raw.servers.any { it.id == configuration.serverUuid } &&
+      parsePlaybackConfiguration(raw, configuration.serverUuid).networkFingerprint == configuration.networkFingerprint
+  }
+
+  suspend fun validateCurrent(configuration: AppNetworkConfiguration): Boolean {
+    val raw = rawSnapshot(configuration.source)
+    return executor.isCurrent(configuration.source) &&
+      parseAppNetworkConfiguration(raw).fingerprint == configuration.fingerprint
+  }
+
+  suspend fun appNetworkConfiguration(
+    expectedSource: PostgresSourceToken? = null,
+    forceRefresh: Boolean = false,
+  ): AppNetworkConfiguration = parseAppNetworkConfiguration(rawSnapshot(expectedSource, forceRefresh))
 
   suspend fun snapshot(server: EmbyServer): PlaybackConfiguration {
     val expected = PostgresSourceToken(server.sourceKey, server.sourceRevision)
@@ -193,8 +256,10 @@ class PlaybackConfigurationRepository(
     val raw = rawSnapshot(expected)
     val row = raw.servers.singleOrNull { it.id == server.remoteId }
       ?: throw PostgresException(PostgresFailure.NOT_FOUND)
-    verifyServerBinding(server, row)
-    return parsePlaybackConfiguration(raw.values, row.id, raw.source)
+    verifyServerBinding(server, row, raw)
+    val result = parsePlaybackConfiguration(raw, row.id)
+    if (!executor.isCurrent(expected)) throw PostgresException(PostgresFailure.SOURCE_CHANGED)
+    return result
   }
 
   /** One repeatable-read transaction and one 60-second cache per exact source/revision token. */
@@ -212,9 +277,8 @@ class PlaybackConfigurationRepository(
       !forceRefresh && it.snapshot.source == expected &&
         now - it.loadedAtNanos in 0 until CACHE_TTL_NANOS && executor.isCurrent(expected)
     }?.let { return@withLock it.snapshot }
-    cache = null
-
-    val result = executor.read(expected.sourceKey) { session ->
+    // Retain the last identity only while refresh is in flight; rawSnapshot never serves expired data.
+    val result = try { executor.read(expected.sourceKey) { session ->
       if (session.source != expected) throw PostgresException(PostgresFailure.SOURCE_CHANGED)
       val connection = session.connection
       fun <T> query(sql: String, bind: (PreparedStatement) -> Unit = {}, read: (ResultSet) -> T): T =
@@ -284,15 +348,27 @@ class PlaybackConfigurationRepository(
           }
         }
       }
-      val reverseProxies = query("SELECT id, name, url FROM reverse_proxy_server ORDER BY create_time, id") { rows ->
+      val selectedReverseIds = (values.entries.filter { it.key in REVERSE_ROUTE_KEYS }.map { it.value } +
+        servers.map { it.reverseProxyId }).filter { it.isNotEmpty() && it != "no" }.distinct()
+      if (selectedReverseIds.size > MAX_REVERSE_ROWS) throw PostgresException(PostgresFailure.SCHEMA_INCOMPATIBLE)
+      val reverseProxies = if (selectedReverseIds.isEmpty()) emptyMap() else query(
+        "SELECT id, name, url FROM reverse_proxy_server WHERE id IN (${selectedReverseIds.joinToString(",") { "?" }}) " +
+          "ORDER BY create_time, id LIMIT ${MAX_REVERSE_ROWS + 1}",
+        bind = { statement -> selectedReverseIds.forEachIndexed { index, id -> statement.setString(index + 1, id) } },
+      ) { rows ->
         linkedMapOf<String, SharedReverseProxyRaw>().apply {
           while (rows.next()) {
-            val row = SharedReverseProxyRaw(rows.requiredString("id"), rows.requiredString("name"), rows.requiredString("url"))
-            if (row.id.isBlank() || put(row.id, row) != null) throw PostgresException(PostgresFailure.SCHEMA_INCOMPATIBLE)
+            val row = SharedReverseProxyRaw(rows.requiredString("id"), rows.string("name"), rows.string("url"))
+            if (row.id !in selectedReverseIds || size >= MAX_REVERSE_ROWS || put(row.id, row) != null) {
+              throw PostgresException(PostgresFailure.SCHEMA_INCOMPATIBLE)
+            }
           }
         }.toMap()
       }
       SharedConfigurationRawSnapshot(values, servers, lines, reverseProxies, session.source)
+    } } catch (error: Exception) {
+      cache = null
+      throw error
     }
     if (!executor.isCurrent(expected) || result.source != expected) {
       cache = null
@@ -301,27 +377,45 @@ class PlaybackConfigurationRepository(
     result.also { cache = Cached(it, nowNanos()) }
   }
 
-  private fun verifyServerBinding(server: EmbyServer, row: SharedServerRaw) {
+  private fun verifyServerBinding(server: EmbyServer, row: SharedServerRaw, raw: SharedConfigurationRawSnapshot) {
     val matches = server.remoteId == row.id && server.baseUrl == row.baseUrl.trimEnd('/') &&
       server.username == row.username && server.password == row.password &&
       server.client == row.client && server.device == row.device && server.deviceId == row.deviceId &&
       server.clientVersion == row.clientVersion && server.userAgent == row.userAgent &&
       server.reverseProxyId == row.reverseProxyId
-    if (!matches) throw PostgresException(PostgresFailure.SOURCE_CHANGED)
+    val reverse = raw.reverseProxies[row.reverseProxyId]?.url.orEmpty()
+    val reverseMatches = row.reverseProxyId.isEmpty() || row.reverseProxyId == "no" ||
+      server.reverseProxyUrl == reverse
+    if (!matches || !reverseMatches) throw PostgresException(PostgresFailure.SOURCE_CHANGED)
   }
 
   private fun ResultSet.string(column: String): String = getString(column).orEmpty()
   private fun ResultSet.requiredString(column: String): String =
     getString(column) ?: throw PostgresException(PostgresFailure.SCHEMA_INCOMPATIBLE)
 
-  private companion object { const val CACHE_TTL_NANOS = 60_000_000_000L }
+  private companion object {
+    const val CACHE_TTL_NANOS = 60_000_000_000L
+    const val MAX_REVERSE_ROWS = 256
+    val REVERSE_ROUTE_KEYS = setOf(
+      "app_reverse_proxy_id", "trakt_reverse_proxy_id", "simkl_reverse_proxy_id", "yamtrack_reverse_proxy_id",
+    )
+  }
 }
 
+private fun route(raw: SharedConfigurationRawSnapshot, key: String): ReverseProxyRoute {
+  val id = raw.values[key]
+  return ReverseProxyRoute.selected(id, raw.reverseProxies[id]?.url)
+}
+
+private fun parseAppNetworkConfiguration(raw: SharedConfigurationRawSnapshot): AppNetworkConfiguration =
+  AppNetworkConfiguration(raw.source, route(raw, "app_reverse_proxy_id"), raw.values["danger_accept_invalid_certs"] == "true")
+
 private fun parsePlaybackConfiguration(
-  values: Map<String, String>,
+  raw: SharedConfigurationRawSnapshot,
   serverUuid: String,
-  source: PostgresSourceToken,
 ): PlaybackConfiguration {
+  val values = raw.values
+  val source = raw.source
   fun long(key: String, invalidFallback: Long): Long =
     values[key].orEmpty().ifEmpty { "0" }.toLongOrNull() ?: invalidFallback
   fun cacheWindow(prefix: String, fallback: Long) = PlaybackCacheWindow(
@@ -350,18 +444,27 @@ private fun parsePlaybackConfiguration(
       refreshToken = values["trakt_refresh_token"].orEmpty(),
       expiresAtSeconds = values["trakt_expires_in"]?.toLongOrNull() ?: 0L,
       redirectUri = values["trakt_redirect_uri"].orEmpty(),
+      reverseRoute = route(raw, "trakt_reverse_proxy_id"),
     ),
     simkl = SimklRuntimeConfiguration(
       enabled = values["simkl_sync_switch"] != "off" && simklUsername.isNotBlank(),
       username = simklUsername,
       accessToken = values["simkl_access_token"].orEmpty(),
+      reverseRoute = route(raw, "simkl_reverse_proxy_id"),
     ),
     yamTrack = YamTrackRuntimeConfiguration(
       enabled = values["yamtrack_sync_switch"] != "off" && yamTrackWebhook.isNotBlank(),
       webhookUrl = yamTrackWebhook,
+      reverseRoute = route(raw, "yamtrack_reverse_proxy_id"),
     ),
     source = source,
     serverUuid = serverUuid,
+    serverBindingFingerprint = raw.servers.singleOrNull { it.id == serverUuid }?.let { row ->
+      runtimeFingerprint(
+        row.baseUrl, row.username, row.password, row.client, row.device, row.deviceId, row.clientVersion,
+        row.userAgent, row.reverseProxyId, raw.reverseProxies[row.reverseProxyId]?.url.orEmpty(),
+      )
+    }.orEmpty(),
   )
 }
 
@@ -370,8 +473,18 @@ internal fun playbackConfigurationForTest(
   values: Map<String, String> = emptyMap(),
   source: PostgresSourceToken = PostgresSourceToken("source", 1),
   serverUuid: String = "server",
+  reverseProxyUrls: Map<String, String> = emptyMap(),
 ): PlaybackConfiguration = parsePlaybackConfiguration(
-  values = values,
+  raw = SharedConfigurationRawSnapshot(
+    values, emptyList(), emptyList(), reverseProxyUrls.mapValues { (id, url) -> SharedReverseProxyRaw(id, "", url) }, source,
+  ),
   serverUuid = serverUuid,
-  source = source,
 )
+
+internal fun appNetworkConfigurationForTest(
+  values: Map<String, String> = emptyMap(),
+  source: PostgresSourceToken = PostgresSourceToken("source", 1),
+  reverseProxyUrls: Map<String, String> = emptyMap(),
+): AppNetworkConfiguration = parseAppNetworkConfiguration(SharedConfigurationRawSnapshot(
+  values, emptyList(), emptyList(), reverseProxyUrls.mapValues { (id, url) -> SharedReverseProxyRaw(id, "", url) }, source,
+))

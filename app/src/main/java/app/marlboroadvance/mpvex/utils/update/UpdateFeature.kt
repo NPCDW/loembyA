@@ -33,6 +33,13 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import app.marlboroadvance.mpvex.R
 import app.marlboroadvance.mpvex.BuildConfig
+import app.marlboroadvance.mpvex.domain.emby.playback.LoopbackHttpPool
+import app.marlboroadvance.mpvex.domain.postgres.AppNetworkConfiguration
+import app.marlboroadvance.mpvex.domain.postgres.PlaybackConfigurationRepository
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import org.koin.java.KoinJavaComponent.get
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -46,8 +53,6 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
-import okhttp3.OkHttpClient
-import okhttp3.Request
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
@@ -79,8 +84,40 @@ data class Asset(
 class UpdateManager(
     private val context: Context
 ) {
-    private val client = OkHttpClient()
+    private val http: LoopbackHttpPool = get(LoopbackHttpPool::class.java)
+    private val configurations: PlaybackConfigurationRepository = get(PlaybackConfigurationRepository::class.java)
     private val json = Json { ignoreUnknownKeys = true }
+
+    private suspend fun request(
+      configuration: AppNetworkConfiguration,
+      originalUrl: String,
+      kind: LoopbackHttpPool.Kind = LoopbackHttpPool.Kind.API,
+    ): okhttp3.Response {
+      var url = configuration.resolveUrl(originalUrl)
+      repeat(11) { redirects ->
+        currentCoroutineContext().ensureActive()
+        if (!configurations.validateCurrent(configuration)) throw IOException("Update route changed")
+        val response = http.execute(
+          url = url,
+          kind = kind,
+          dangerAcceptInvalidCerts = configuration.dangerAcceptInvalidCertificates,
+          retry = false,
+          redirectPolicy = LoopbackHttpPool.RedirectPolicy.NONE,
+        )
+        try {
+          if (!configurations.validateCurrent(configuration)) throw IOException("Update route changed")
+          if (response.code !in setOf(301, 302, 303, 307, 308)) return response
+          val location = response.header("Location") ?: return response
+          if (redirects == 10) throw IOException("Too many update redirects")
+          url = configuration.resolveRedirect(response.request.url.toString(), location)
+        } catch (failure: Exception) {
+          response.close()
+          throw failure
+        }
+        response.close()
+      }
+      throw IOException("Too many update redirects")
+    }
 
     suspend fun checkForUpdate(forceShow: Boolean = false): Release? {
         // Return null immediately if update feature is disabled (F-Droid flavor)
@@ -88,7 +125,7 @@ class UpdateManager(
             return null
         }
         
-        val release = getLatestRelease("https://api.github.com/repos/marlboro-advance/mpvEx/releases/latest")
+        val release = getLatestRelease(LOEMBYA_RELEASE_API)
         val currentVersion = BuildConfig.VERSION_NAME.replace("-dev", "")
         val remoteVersion = release.tagName.removePrefix("v")
         val prefs = context.getSharedPreferences("mpvEx_prefs", Context.MODE_PRIVATE)
@@ -119,13 +156,15 @@ class UpdateManager(
     }
 
     private suspend fun getLatestRelease(url: String): Release = withContext(Dispatchers.IO) {
-        val request = Request.Builder().url(url).build()
-        val response = client.newCall(request).execute()
-        if (!response.isSuccessful) throw IOException("Unexpected code $response")
-
+      val configuration = configurations.appNetworkConfiguration()
+      request(configuration, url).use { response ->
+        if (!response.isSuccessful) throw IOException("Update check failed (HTTP ${response.code})")
         val responseBody = response.body.string()
-        if (responseBody.isEmpty()) throw IOException("Empty body")
+        if (responseBody.isEmpty()) throw IOException("Empty update response")
+        currentCoroutineContext().ensureActive()
+        if (!configurations.validateCurrent(configuration)) throw IOException("Update route changed")
         json.decodeFromString<Release>(responseBody)
+      }
     }
 
     private fun isNewerVersion(remote: String, current: String): Boolean {
@@ -147,88 +186,54 @@ class UpdateManager(
             return flowOf(100f)
         }
         
-        val asset = selectBestApkAsset(release.assets)
+        val asset = selectLoembyAReleaseAsset(release.assets, release.tagName, Build.SUPPORTED_ABIS.toList())
             ?: throw Exception("No compatible APK asset found")
         
-        val destination = File(context.externalCacheDir, asset.name)
-        return downloadApk(asset.downloadUrl, destination)
+        val destination = File(context.externalCacheDir ?: context.cacheDir, asset.name)
+        return downloadApk(asset, destination)
     }
 
-    private fun selectBestApkAsset(assets: List<Asset>): Asset? {
-        val deviceArch = getDeviceArchitecture()
-        
-        // First, try to find architecture-specific APK
-        val archSpecificApk = assets.firstOrNull { asset ->
-            asset.name.endsWith(".apk") && asset.name.contains(deviceArch, ignoreCase = true)
-        }
-        
-        if (archSpecificApk != null) {
-            return archSpecificApk
-        }
-        
-        // Fallback to universal APK
-        val universalApk = assets.firstOrNull { asset ->
-            asset.name.endsWith(".apk") && asset.name.contains("universal", ignoreCase = true)
-        }
-        
-        if (universalApk != null) {
-            return universalApk
-        }
-        
-        // Last resort: any APK
-        return assets.firstOrNull { it.name.endsWith(".apk") }
-    }
 
-    private fun getDeviceArchitecture(): String {
-        // Get the primary ABI (Application Binary Interface)
-        val primaryAbi = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            Build.SUPPORTED_ABIS[0]
-        } else {
-            @Suppress("DEPRECATION")
-            Build.CPU_ABI
-        }
-        
-        // Map Android ABI names to your APK naming convention
-        return when (primaryAbi) {
-            "arm64-v8a" -> "arm64-v8a"
-            "armeabi-v7a" -> "armeabi-v7a"
-            "x86" -> "x86"
-            "x86_64" -> "x86_64"
-            else -> "universal" // Fallback for unknown architectures
-        }
-    }
-
-    private fun downloadApk(url: String, destination: File): Flow<Float> = flow {
-        val request = Request.Builder().url(url).build()
-        val response = client.newCall(request).execute()
-        if (!response.isSuccessful) throw IOException("Unexpected code $response")
-
-        val body = response.body
-        val contentLength = body.contentLength()
-        val inputStream = body.byteStream()
-        val outputStream = FileOutputStream(destination)
-
-        try {
-            val buffer = ByteArray(8 * 1024)
-            var bytesRead: Int
-            var totalBytesRead: Long = 0
-
-            while (inputStream.read(buffer).also { bytesRead = it } != -1) {
-                outputStream.write(buffer, 0, bytesRead)
-                totalBytesRead += bytesRead
-                val progress = if (contentLength > 0) {
-                    (totalBytesRead.toFloat() / contentLength.toFloat()) * 100
-                } else {
-                    -1f 
-                }
-                emit(progress)
+    private fun downloadApk(asset: Asset, destination: File): Flow<Float> = flow {
+      val configuration = configurations.appNetworkConfiguration()
+      val partial = File.createTempFile("loembya-update-", ".part", destination.parentFile)
+      try {
+        request(configuration, asset.downloadUrl, LoopbackHttpPool.Kind.API).use { response ->
+          kotlinx.coroutines.coroutineScope {
+            val cancellation = launch(Dispatchers.IO, start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+              try { kotlinx.coroutines.awaitCancellation() } finally { response.close() }
             }
-            outputStream.flush()
-            emit(100f) 
-        } finally {
-            inputStream.close()
-            outputStream.close()
+            try {
+              if (!response.isSuccessful) throw IOException("Update download failed (HTTP ${response.code})")
+              response.body.byteStream().use { input ->
+                FileOutputStream(partial).use { output ->
+                  val buffer = ByteArray(8 * 1024)
+                  var total = 0L
+                  while (true) {
+                    currentCoroutineContext().ensureActive()
+                    val read = input.read(buffer)
+                    if (read < 0) break
+                    if (total + read > asset.size) throw IOException("Update size mismatch")
+                    output.write(buffer, 0, read)
+                    total += read
+                    emit(total.toFloat() / asset.size * 100f)
+                  }
+                  if (total != asset.size) throw IOException("Incomplete update download")
+                  output.flush()
+                }
+              }
+            } finally {
+              cancellation.cancel()
+            }
+          }
         }
+        currentCoroutineContext().ensureActive()
+        if (!configurations.validateCurrent(configuration)) throw IOException("Update route changed")
+        if (!partial.renameTo(destination)) throw IOException("Cannot finish update download")
+        emit(100f)
+      } finally {
+        partial.delete()
+      }
     }.flowOn(Dispatchers.IO)
     
     fun getApkFile(release: Release): File? {
@@ -237,9 +242,9 @@ class UpdateManager(
             return null
         }
         
-        val asset = selectBestApkAsset(release.assets) ?: return null
-        val file = File(context.externalCacheDir, asset.name)
-        return if (file.exists()) file else null
+        val asset = selectLoembyAReleaseAsset(release.assets, release.tagName, Build.SUPPORTED_ABIS.toList()) ?: return null
+        val file = File(context.externalCacheDir ?: context.cacheDir, asset.name)
+        return if (file.isFile && file.length() == asset.size) file else null
     }
 
     fun clearCache() {
@@ -329,8 +334,9 @@ class UpdateViewModel(application: Application) : AndroidViewModel(application) 
                     if (manual) _updateState.value = UpdateState.NoUpdate
                     else _updateState.value = UpdateState.Idle
                 }
-            } catch (e: Exception) {
-                e.printStackTrace()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
                 if (manual) _updateState.value = UpdateState.Error
                 else _updateState.value = UpdateState.Idle
             }
@@ -351,10 +357,12 @@ class UpdateViewModel(application: Application) : AndroidViewModel(application) 
                 }
                 _isDownloading.value = false
                  _updateState.value = UpdateState.ReadyToInstall(release)
-            } catch (e: Exception) {
-                e.printStackTrace()
+            } catch (cancelled: CancellationException) {
                 _isDownloading.value = false
-                _updateState.value = UpdateState.Error 
+                throw cancelled
+            } catch (_: Exception) {
+                _isDownloading.value = false
+                _updateState.value = UpdateState.Error
             }
         }
     }

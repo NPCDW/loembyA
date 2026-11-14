@@ -61,9 +61,8 @@ enum class Decoder(
  * - **硬件解码 / 硬件解码+ / 软件解码**：不问设备，用户说什么就是什么。
  *   出问题时用来做对照实验 —— 这是排查「花屏是硬解的锅还是软解的锅」最快的办法。
  *
- * ⚠️ 枚举的 `name` 是**持久化键**（`getEnum` 存 name），发布后不可改名：
- * `Auto` / `Hardware` / `HardwarePlus` / `Software` 都是 v218/v219 就写进用户机器里的值，
- * 这里只新增 `AutoHardwarePlus`，其余三个沿用原名、只改文案。
+ * 枚举的 `name` 是持久化键（`getEnum` 存 name），不可随显示文案改名。
+ * `Auto` / `AutoHardwarePlus` / `Hardware` / `HardwarePlus` / `Software` 必须保持兼容。
  */
 enum class DefaultDecoder(
   @StringRes val titleRes: Int,

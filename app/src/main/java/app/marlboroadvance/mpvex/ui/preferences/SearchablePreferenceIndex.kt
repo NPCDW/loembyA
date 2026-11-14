@@ -3,7 +3,7 @@ package app.marlboroadvance.mpvex.ui.preferences
 import app.marlboroadvance.mpvex.R
 
 /**
- * 设置搜索索引（v172 起）—— 由 `tools/gen_pref_index.py` 从各设置页源码抽取，**不要手改**。
+ * 设置搜索索引——由 `tools/gen_pref_index.py` 从各设置页源码抽取；索引条目不要手改。
  *
  * 为什么需要这一份：手写索引 [SearchablePreferences] 每张页面只登记了「首页那个入口」，
  * 而 `PreferencesScreen.kt` 里内联着上百个配置项（Emby 推荐 / 封面合成 / 随机播放 /
@@ -14,7 +14,7 @@ import app.marlboroadvance.mpvex.R
  * `SliderPreference` / `Preference` 与 `ToggleRow` 之类自定义行都算），副标题取紧随
  * 其后的 `summary =` / `subtitle =`，分类取最近一个 `PreferenceSectionHeader`。
  *
- * ⚠️ v174：**只收录「能定位」的行**。定位靠「那一行显示的文字」本身（行上是
+ * 只收录可定位的行。定位使用该行显示的文字（行上是
  * `Modifier.settingsAnchor(...)`，本文件是 `titleRes` / `title`，同一表达式派生所以
  * 必然一致）。搜得到却点过去没反应，比搜不到更让人困惑，所以定位不了的行干脆不收。
  *
@@ -339,12 +339,6 @@ internal val generatedSearchablePreferences: List<SearchablePreference> = buildL
     add(SearchablePreference(
         titleRes = R.string.pref_player_disk_cache,
         summaryRes = R.string.pref_player_disk_cache_summary,
-        category = "常规",
-        screen = PlayerPreferencesScreen,
-    ))
-    add(SearchablePreference(
-        titleRes = R.string.pref_player_disk_cache_size,
-        summaryRes = R.string.pref_player_disk_cache_size_summary,
         category = "常规",
         screen = PlayerPreferencesScreen,
     ))

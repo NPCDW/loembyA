@@ -335,7 +335,7 @@ data class EmbyLibraryScreen(
     // 和排序、筛选一样**按库持久化**：从库里下钻进一个文件夹再返回时，这一页的组合会被重建，
     // 只放在 remember 里的话分类会被打回「全部」。落盘后返回、甚至重启 App 都还在上次的档位。
     //
-    // 三层优先级（v176）：
+    // 三层优先级：
     //   ① 本目录自己的记忆 —— 用户在这个目录里手动选过档位就以它为准，从哪儿进来都一样；
     //   ② 父页带下来的档位 [inheritCategory] —— 下钻时「文件夹」不再自己退回「全部」；
     //   ③ 全部。
@@ -615,12 +615,9 @@ data class EmbyLibraryScreen(
     var actionTarget by remember { mutableStateOf<EmbyItem?>(null) }
 
     /**
-     * 「正在打开」整页加载层（v172）：随机播放 / 随机播放收藏 / 视界流 / 随机播放图片
-     * 这四个入口在**取数阶段**是纯挂起的网络请求（递归下钻时能慢到几秒），
-     * 以前这段时间屏幕上什么都不会动，用户会以为没点上、然后连点第二下。
-     *
-     * 与网络位置、Emby 详情页那一层是同一个全局入口（[AppLoadingIndicator]），
-     * 所以「外观 → 加载动画」里换的样式 / 大小在这里同样生效。
+     * 「正在打开」整页加载层：随机播放、随机播放收藏、视界流与随机播放图片
+     * 在取数期间可能挂起数秒。显示反馈并阻止重复点击，避免同时启动多个播放入口。
+     * 使用全局 [AppLoadingIndicator]，遵循加载动画的样式与大小设置。
      */
     var randomLaunching by remember { mutableStateOf(false) }
   /** 长按发生的位置（root 坐标）：菜单锚在这里展开，而不是屏幕中间 */
@@ -1006,7 +1003,7 @@ data class EmbyLibraryScreen(
           // 更是常常只搜可播放媒体），于是「在文件夹视图里按名字找子目录」永远为空。
           // 但那些子目录就在用户眼前摆着，直接按名字补进来即可 —— 零请求、零浏览态改动。
           // ⚠️ 必须用 [layerItems] 而不是 `items`：后者是 remember(cacheKey) 的，敲第一个字
-          //    的那一刻就被重置成空列表，用它做兜底等于什么都没补（这是 v211 第一版的真 bug）。
+          //    的那一刻就被重置成空列表，无法作为搜索兜底。
           // 局限写在明处：只补当前已加载的这一层，还没翻到的分页不保证。
           val layerSnapshot = layerItems
           val result = viewModel.search(
@@ -1633,7 +1630,7 @@ data class EmbyLibraryScreen(
     var gachaCards by remember { mutableStateOf<List<GachaCard>>(emptyList()) }
     var gachaRollId by remember { mutableIntStateOf(0) }
     var gachaRolling by remember { mutableStateOf(false) }
-    // 上一批：抽完关掉就再也看不到的那些卡（v202）。
+    // 保留上一批抽卡结果，关闭揭晓层后仍可重新查看。
     // ⚠️ 存的是**上一批**，不是当前这一批 —— 当前这一批就在 gachaCards 里，
     //    再存一份只会让「上一批」在重抽的瞬间变成「这一批自己」。
     //    重抽（rollId 自增）成功后才把它顶掉，仍能按 ← → 来回看。
@@ -1738,7 +1735,7 @@ data class EmbyLibraryScreen(
               server = current,
               item = item,
               title = viewModel.displayTitle(item),
-              // 海报按**实际显示尺寸**向服务端要（v202）：网格小卡 111~180dp 宽、
+              // 海报按实际显示尺寸向服务端请求：网格小卡 111~180dp 宽、
               // 详情里的缩略图 96dp，480px 是纯浪费 —— Emby 的 `maxWidth` 就是
               // 服务端缩放宽度，传小一档服务端直接给更小的图，省一半上下流量。
               // 单抽大卡宽度封顶 380dp，480px 仍然够（密度 2x 时才勉强到 760，
@@ -1790,7 +1787,7 @@ data class EmbyLibraryScreen(
      *
      * ⚠️ 多张时这是**替换**现有队列，不是追加：`launchRandomPlaybackAwait` 起的是一个
      *    新播放列表。所以按钮文案写「队列播放」而不是「全部入队」—— 「入队」会让人
-     *    以为在原有队列后面接着排（v202 改文案，用户确认）。
+     *    误以为追加到原有队列。
      *    顺序就是揭晓顺序，这里不打乱。
      */
     fun playGachaCards(batch: List<GachaCard>) {
@@ -1982,7 +1979,7 @@ data class EmbyLibraryScreen(
             }) {
               Icon(Icons.Default.Casino, contentDescription = "随机抽卡")
             }
-            // 「上一批」：抽完关掉之后，这批卡就再也找不回来了（v202）。
+            // 「上一批」入口用于重新查看已关闭的抽卡结果。
             // 只抽过、且现在没有正在抽的时候才出现 —— 平时不占顶栏的位置。
             // 图标用 History：它表达的是「翻回刚才那次结果」，不是「再来一次」
             // （再来一次已经是抽卡键自己）。
@@ -2843,7 +2840,7 @@ if (viewMode == EmbyLibraryViewMode.YEAR) {
           }
         }
 
-        // ── 「正在打开」整页加载层（v172）──
+        // ── 「正在打开」整页加载层 ──
         // 位置：内容容器的**最后一个子节点** —— 后声明的画在上层，才盖得住网格；
         // 同时又排在所有对话框之前，所以弹窗仍然压在它上面。
         //
@@ -2874,7 +2871,7 @@ if (viewMode == EmbyLibraryViewMode.YEAR) {
       }
     }
 
-      // ── 随机抽卡：全屏揭晓层（v194，v197 起支持多抽）──
+      // ── 随机抽卡：单抽与多抽共用的全屏揭晓层 ──
       // 用 Dialog（而不是在本页里叠一层 Box）是为了天然盖住顶栏 / 工具行 / 网格，
       // 返回键也天然走 onDismiss。取数中 cards 为空，那一层自己播「准备中」的法阵。
       if (gachaOpen) {
@@ -2890,7 +2887,7 @@ if (viewMode == EmbyLibraryViewMode.YEAR) {
           onReroll = {
             rollGacha(excludeId = if (gachaCards.size == 1) gachaCards.first().item.Id else null)
           },
-          // 关掉时把这一批存成「上一批」（v202）：否则这批卡关掉就再也找不回来。
+          // 关闭时把非空结果存为上一批，供之后重新查看。
           // 只存非空的 —— 取数失败 / 还在取数时关掉，不该用空列表顶掉上一批。
           onDismiss = {
             gachaOpen = false

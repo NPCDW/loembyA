@@ -369,6 +369,119 @@ class PlaybackScrobblerTest {
     job.cancelAndJoin()
   }
 
+  @Test fun `independent reverse prefixes cover trakt refresh scrobbles simkl and encoded yamtrack webhook`() = runBlocking {
+    val f = Fixture()
+    f.values["trakt_expires_in"] = "1"
+    listOf("trakt", "simkl", "yamtrack", "app").forEach { service ->
+      f.values["${service}_reverse_proxy_id"] = service
+      f.reverse[service] = "https://$service-relay.test/r"
+    }
+    f.values["yamtrack_sync_url"] = "https://yam.example/hook%2Fpart?q=a%2Bb"
+    f.respond = { if (it.url.contains("token-exchange")) refresh("rotated") else ScrobbleResponse(200) }
+    val session = f.start()
+    f.scrobbler.stop(session, 90.0, 100.0)
+    assertEquals("https://trakt-relay.test/r/https://token-exchange.i101.workers.dev/trakt", f.requests[0].url)
+    assertEquals("https://trakt-relay.test/r/https://api.trakt.tv/scrobble/start", f.requests[1].url)
+    assertEquals("https://simkl-relay.test/r/https://api.simkl.com/scrobble/start", f.requests[2].url)
+    assertEquals("https://yamtrack-relay.test/r/https://yam.example/hook%2Fpart?q=a%2Bb", f.requests[3].url)
+    assertEquals("https://trakt-relay.test/r/https://api.trakt.tv/scrobble/stop", f.requests[4].url)
+    assertTrue(f.requests.none { it.url.contains("app-relay") })
+    assertEquals("Bearer rotated", f.requests[1].headers["Authorization"])
+    assertNull(f.requests[0].headers["Authorization"])
+    assertTrue(f.requests.all { it.headers["Content-Type"] == "application/json; charset=UTF-8" })
+    assertTrue(f.notices.isEmpty())
+  }
+
+  @Test fun `blocked service routes send nothing and failures never expose selected endpoint`() = runBlocking {
+    val f = Fixture()
+    f.values["trakt_reverse_proxy_id"] = "missing"
+    f.values["simkl_reverse_proxy_id"] = "invalid"
+    f.reverse["invalid"] = "https://user:secret@bad-relay.test/r"
+    f.values["yamtrack_reverse_proxy_id"] = "yam"
+    f.reverse["yam"] = "https://yam-relay.test/r"
+    f.start()
+    assertEquals(1, f.requests.size)
+    assertTrue(f.requests.single().url.startsWith("https://yam-relay.test/r/"))
+    assertEquals(2, f.notices.size)
+    listOf("secret", "missing", "invalid", "relay.test").forEach { value ->
+      assertTrue(f.notices.none { it.contains(value) })
+    }
+  }
+
+  @Test fun `reverse prefix or selection changes invalidate memory trakt overlay within same PG source`() = runBlocking {
+    val f = Fixture()
+    f.values["trakt_expires_in"] = "1"
+    f.values["trakt_reverse_proxy_id"] = "route"
+    f.reverse["route"] = "https://relay-a.test/r/"
+    var rotations = 0
+    f.respond = { if (it.url.contains("token-exchange")) refresh("rotate-${++rotations}") else ScrobbleResponse(200) }
+    f.start(); f.start()
+    assertEquals(1, rotations)
+    f.reverse["route"] = "https://relay-b.test/r/"
+    f.start()
+    assertEquals(2, rotations)
+    f.values["trakt_reverse_proxy_id"] = "another"
+    f.reverse["another"] = f.reverse.getValue("route")
+    f.start()
+    assertEquals(3, rotations)
+  }
+
+  @Test fun `already routed webhook no duplicate prefix and redirects do not trigger scrobble retry`() = runBlocking {
+    val f = Fixture()
+    f.values["trakt_sync_switch"] = "off"
+    f.values["simkl_sync_switch"] = "off"
+    f.values["yamtrack_reverse_proxy_id"] = "route"
+    f.reverse["route"] = "https://relay.test/r/"
+    f.values["yamtrack_sync_url"] = "https://relay.test/r/https://yam.example/hook?q=a%2Bb"
+    f.respond = { ScrobbleResponse(307, "private-response") }
+    f.start()
+    assertEquals(1, f.requests.size)
+    assertEquals(f.values["yamtrack_sync_url"], f.requests.single().url)
+    assertTrue(f.waits.isEmpty())
+    assertEquals(listOf("YamTrack 开始播放同步失败（HTTP 307）"), f.notices)
+  }
+
+  @Test fun `async route validation rejects stale same-source snapshots before transport`() = runBlocking {
+    val f = Fixture()
+    val scrobbler = PlaybackScrobbler(
+      ScrobbleTransport { url, body, headers, danger ->
+        f.requests += Request(url, body, headers, danger)
+        ScrobbleResponse(200)
+      }, { true }, {}, validate = { false },
+    )
+    try {
+      scrobbler.start(f.server(), movie, null, f.config())
+      fail("Expected stale route failure")
+    } catch (_: Exception) { }
+    assertTrue(f.requests.isEmpty())
+  }
+
+  @Test fun `settlement waits for source route validation before claiming stopped exactly once`() = runBlocking {
+    val f = Fixture()
+    val entered = CompletableDeferred<Unit>()
+    val release = CompletableDeferred<Unit>()
+    var stopping = false
+    val scrobbler = PlaybackScrobbler(
+      ScrobbleTransport { url, body, headers, danger ->
+        f.requests += Request(url, body, headers, danger)
+        ScrobbleResponse(200)
+      }, { true }, {}, validate = {
+        if (stopping) { entered.complete(Unit); release.await() }
+        true
+      },
+    )
+    val session = scrobbler.start(f.server(), movie, null, f.config())
+    stopping = true
+    val stop = async { scrobbler.stop(session, 90.0, 100.0) }
+    entered.await()
+    assertFalse(session.stopped.get())
+    release.complete(Unit)
+    stop.await()
+    scrobbler.stop(session, 90.0, 100.0)
+    assertEquals(6, f.requests.size)
+    assertTrue(session.stopped.get())
+  }
+
   private class Request(
     val url: String,
     val body: String,
@@ -381,11 +494,12 @@ class PlaybackScrobblerTest {
     var source = PostgresSourceToken("fake-source", 0)
     val values = linkedMapOf("trakt_username" to "trakt-user", "trakt_access_token" to "access", "trakt_refresh_token" to "refresh", "trakt_expires_in" to "1000000", "trakt_redirect_uri" to "http://127.0.0.1:123/trakt_auth", "simkl_username" to "simkl-user", "simkl_access_token" to "simkl", "yamtrack_sync_url" to "https://yam.example/hook")
     val requests = mutableListOf<Request>(); val notices = mutableListOf<String>(); val waits = mutableListOf<Long>()
+    val reverse = mutableMapOf<String, String>()
     var respond: suspend (Request) -> ScrobbleResponse = { ScrobbleResponse(200) }
     val scrobbler = PlaybackScrobbler(ScrobbleTransport { url, body, headers, danger ->
       val request = Request(url, body, headers, danger); requests += request; respond(request)
     }, { it.source == source }, { notices += it }, { 1000L }, { waits += it })
-    fun config() = playbackConfigurationForTest(values.toMap(), source, "server")
+    fun config() = playbackConfigurationForTest(values.toMap(), source, "server", reverse.toMap())
     fun server() = EmbyServer(name = "Fake", host = "fake.example", username = "fake", password = "fake", remoteId = "server", sourceKey = source.sourceKey, sourceRevision = source.revision)
     suspend fun start() = scrobbler.start(server(), movie, null, config())
   }

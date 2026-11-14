@@ -128,7 +128,7 @@ class PlayerViewModel(
   val pos by PlayerLib.propInt["time-pos"].collectAsState(viewModelScope)
   val duration by PlayerLib.propInt["duration"].collectAsState(viewModelScope)
 
-  // ── 暂停写入通道（v179，见 init 里的消费者）──────────────────────────────
+  // ── 暂停写入通道（见 init 里的消费者）──────────────────────────────
 
   /**
    * 「想要的暂停态」单槽，`null` = 还没有人要求过。
@@ -252,7 +252,7 @@ class PlayerViewModel(
   fun resetProbedDuration() {
     _probedDuration.value = 0f
     _durationUntrusted.value = false
-    // ⚠️ 必须把 mpv 那一份也清掉（v179）：不清的话，新片报出时长之前，
+    // ⚠️ 必须把 mpv 那一份也清掉：不清的话，新片报出时长之前，
     // 进度条画的是**上一部片**的时长；更糟的是 [acceptMpvDuration] 的
     // 「同片跳变」闸门会拿旧片的值当基准，把新片（更长的）正常时长误判成离谱值。
     // 清成 0 之后不用等 StateFlow 重发 —— 时长看守每秒都会把 mpv 当前值喂回
@@ -261,7 +261,7 @@ class PlayerViewModel(
   }
 
   /**
-   * 采信一条 mpv 报的 `duration`（秒）—— **带「离谱值」闸门**（v179）。
+   * 采信一条 mpv 报的 `duration`（秒）—— **带「离谱值」闸门**。
    *
    * ## 为什么需要闸门
    *
@@ -346,7 +346,7 @@ class PlayerViewModel(
 
     viewModelScope.launch {
       PlayerLib.propNode["demuxer-cache-state"].collect { node ->
-        if (node != null) _cacheTimelineNode.value = node
+        _cacheTimelineNode.value = node
       }
     }
 
@@ -437,8 +437,32 @@ class PlayerViewModel(
   private val _firstFrameRendered = MutableStateFlow(false)
   val firstFrameRendered: StateFlow<Boolean> = _firstFrameRendered.asStateFlow()
 
+  private val _loadingState = MutableStateFlow(PlayerLoadingState())
+  val loadingState: StateFlow<PlayerLoadingState> = _loadingState.asStateFlow()
+
+  fun onPausedForCache(value: Boolean) {
+    _loadingState.update { it.cachePaused(value) }
+  }
+
+  fun onNativeSeeking(value: Boolean) {
+    _loadingState.update { it.seekChanged(value) }
+  }
+
+  fun onNativeBufferingProgress(value: Long?) {
+    _loadingState.update { it.progress(value) }
+  }
+
+  fun onNativePause(value: Boolean) {
+    _loadingState.update { it.manualPause(value) }
+  }
+
+  fun onPlaybackStopped() {
+    _loadingState.update { it.stopped() }
+  }
+
   /** 换片 / 重新加载时把「首帧已出」打回 false，让加载层重新出现。 */
   fun onLoadingNewFile() {
+    _loadingState.update { it.newFile() }
     _firstFrameRendered.value = false
     _cacheTimelineNode.value = null
     _precisePosition.value = 0f
@@ -451,6 +475,7 @@ class PlayerViewModel(
 
   /** mpv 报 `PLAYBACK_RESTART`（首帧已上屏）时调用。 */
   fun onFirstFrameRendered() {
+    _loadingState.update { it.restarted() }
     _firstFrameRendered.value = true
   }
 
@@ -470,6 +495,7 @@ class PlayerViewModel(
 
   /** 显示播放错误卡片（`message` 是已经写好的人话，直接展示）。 */
   fun showPlaybackError(message: String) {
+    onPlaybackStopped()
     _playbackError.value = message
   }
 
@@ -866,6 +892,7 @@ class PlayerViewModel(
    * 单槽 StateFlow 保证**最后一次意图胜出**，collect 串行保证**不会交错**。
    */
   private fun setPaused(wantPaused: Boolean) {
+    _loadingState.update { it.manualPause(wantPaused) }
     _pauseIntent.value = wantPaused
   }
 
@@ -996,7 +1023,7 @@ class PlayerViewModel(
 
   // ==================== Seeking ====================
 
-  // ── 拖动节流（v217）──
+  // ── 拖动节流──
   // 一条在途的绝对 seek（单飞：新的取消旧的，避免乱序落地）
   private var scrubSeekJob: Job? = null
   private var scrubThrottleJob: Job? = null
@@ -1040,7 +1067,7 @@ class PlayerViewModel(
   }
 
   /**
-   * 拖动进度条期间的 seek —— **每一帧移动都会进来，必须节流**（v217）。
+   * 拖动进度条期间的 seek —— **每一帧移动都会进来，必须节流**。
    *
    * 为什么不能像 [seekTo] 那样来一次发一次：一次两秒的拖动会打出 60~120 条
    * `seek` 命令，而网络流上每条 seek 的代价是「丢掉已缓存区间 → HTTP Range

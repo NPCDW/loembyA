@@ -179,16 +179,8 @@ fun EmbyHomeScreen(
   // 只有列表停在顶部时才允许下拉刷新：滚到中间往下拉，列表自己会往上滚，不该触发刷新
   val homeListState = rememberLazyListState()
 
-  // ── 「继续观看」这一行的滚动状态（v227 / v230）──
-  // 原来这行没传 state，用的是 Compose 内部那个 `rememberLazyListState`：横向偏移会一直
-  // 留着 —— 下拉刷新把内容换掉了，位置还停在原处，用户看到的就是「刷了但没回到第一条」。
-  //
-  // v230：回开头的时机从「刷新结束」挪到「刷新开始」。
-  // `PullRefreshCore` 在 `onRefresh()` 跑完之后还要 `delay(delayAfterRefresh = 800ms)` 才把
-  // `isRefreshing` 置 false（那段是「别让转圈一闪就没」的观感补偿）⇒ key 挂在 false 上就等于
-  // 让用户在**数据已经换好**之后再干看 800ms 的旧横向位置，然后才「咔」地跳回第一条。
-  // 这正是「滚到 item(0) 有延迟」。挪到 true 之后：手指一松、转圈刚起来，这一行就已经在
-  // 第 0 格了，随后新内容在 0 格上原地换掉，全程看不到回位动作。
+  // 独立保存继续观看的横向位置，并在刷新开始时回顶。
+  // PullRefreshCore 的收尾延时只用于转圈观感，不应推迟列表回位。
   val resumeRowState = rememberLazyListState()
   LaunchedEffect(isRefreshing.value) {
     if (isRefreshing.value) resumeRowState.scrollToItem(0)

@@ -59,7 +59,9 @@ Emby 会话上报 + 共享播放历史 + 可选第三方同步
 
 播放器只接受应用内部创建、绑定到有效 Emby 会话的 HTTP(S) 媒体任务。`127.0.0.1` 服务用于隐藏上游凭据、处理媒体流和字幕，并不是可从外部调用的通用播放代理。
 
-共享配置中的普通 HTTP/HTTPS/SOCKS 正向代理会被 Android 忽略；`reverse_proxy_server` 仍作为 loemby 兼容的 Emby URL 反向路由使用。
+共享配置中的普通 HTTP/HTTPS/SOCKS 正向代理会被 Android 忽略。`reverse_proxy_server` 支持 Emby 的服务器反向路由，以及 `app_reverse_proxy_id`、`trakt_reverse_proxy_id`、`simkl_reverse_proxy_id`、`yamtrack_reverse_proxy_id` 对应的应用数据/图标/更新和追踪服务线路。Android 只读取所选反代，不修改共享配置；失效引用不会静默退回直连。
+
+缓存窗口由共享 PostgreSQL 的前向/回看缓存配置和所选版本码率计算，文件总大小不是缓存目标。播放器不额外限制为固定 45 秒预读；进度条以 native 当前可寻址缓存范围为准，回看缓存被丢弃后也会更新。可选“临时磁盘缓冲”只在当前播放中使用，关闭后释放，不提供离线播放或跨会话复用，也没有独立的物理磁盘占用上限。
 
 ## 当前功能
 
@@ -167,14 +169,20 @@ APK 位于 `app/build/outputs/apk/<flavor>/<buildType>/`。物理 arm64 设备�
 
 ### Release 签名
 
-Release 签名从仓库根目录、已被 Git 忽略的 `keystore.properties` 读取：
+Release 有两条签名路径，通过 Boolean Gradle 属性 `externalReleaseSigning` 显式区分；该属性仅接受 `true` 或 `false`，其他值会使配置失败。
+
+**本机 Gradle 签名（默认）**：不传该属性或传 `-PexternalReleaseSigning=false` 时，保持原有行为，从仓库根目录、已被 Git 忽略的 `keystore.properties` 读取：
 
 - `storeFile`
 - `storePassword`
 - `keyAlias`
 - `keyPassword`
 
-配置缺失时构建仍可完成，但产物未签名，不能直接安装。不要把签名材料或口令提交到仓库。
+完整配置可用时由 Gradle 签署 release APK。配置缺失或不完整不会单独阻止构建；如果构建 release，产物未签名，不能直接安装。此提示不代表 debug APK 未签名，debug 保持 Android 默认调试签名。
+
+**CI 外部签名**：`.github/workflows/release.yml` 构建 standard ARM64 release 时传入 `-PexternalReleaseSigning=true`，即使本机存在签名配置，Gradle 也会忽略它并生成未签名中间 APK。随后工作流使用既有 GitHub Actions 签名 secrets 完成对齐和签名（V1/V4 关闭、V2/V3 开启），验证签名、对齐、包名、版本和 ARM64 ABI，通过后明确记录最终已验证的签名 APK，并附上 SHA-256 校验文件创建 GitHub Release 草稿。未签名中间 APK 不是最终发布附件；手动启用此模式也必须在构建后另行签名和验证才能安装或分发。
+
+不要把签名材料或口令提交到仓库，也不要将它们或证书主体写入日志。
 
 弹幕开放平台参数可从已忽略的 `local.properties` 注入 `BuildConfig`。这只能避免凭据进入 Git，不能让凭据在 APK 中保密；公开构建不应放入不适合分发到客户端的秘密。
 
@@ -201,7 +209,7 @@ adb -s <serial> install -r <apk-path>
 - 应用允许访问用户配置的 HTTP Emby / 反向路由地址，并信任系统 CA 和用户安装的 CA；
 - `danger_accept_invalid_certs` 会进一步关闭 TLS 证书和主机名校验，仅应在明确知情时启用；
 - 启用后，Trakt、Simkl、YamTrack、弹幕和 standard flavor 更新器会访问各自服务；
-- 正向代理服务器设置及其凭据不会被 Android 读取或使用，反向路由仍会影响 Emby URL；
+- 正向代理服务器设置及其凭据不会被 Android 读取或使用；启用的反代会接收其对应服务的请求（追踪 token、Webhook 等也经过该线路），只应选择可信反代；
 - 应用锁主要用于防止随手打开或儿童误操作，不是高强度加密边界；
 - 崩溃报告保存在本机，不会自动上传；
 - 播放器和视界流 Activity 不导出；MediaInfo 分析器会响应系统 SEND / VIEW 请求，但不会进入播放流程。

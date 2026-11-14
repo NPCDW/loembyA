@@ -94,20 +94,10 @@ object EmbyPlaybackReporter {
   /**
    * 由播放页提供的「当前正在播的是哪一条」。
    *
-   * ## 为什么需要这个口子（v223）
-   *
-   * 本类是个 object，拿不到播放页的 `playlistIndex` —— 那是 Compose 状态，而且被
-   * 「拖动重排队列 / 随机播放」改过，与 intent 里的原始顺序早就错位了。播放页的
-   * `PlayerActivity.currentEmbyItemId()` 已经把「路径反查 + 按当前下标兜底」两条路
-   * 都实现了（302 直链、ISO 本地代理两种 path 都覆盖），这里直接借用，不复制逻辑。
-   *
-   * ⚠️ 不接这个口子的后果就是 v222 及之前的线上现象：开了「预解析直链（302）」后
-   * mpv 的 `path` 是网盘 CDN 域名，`/Videos/{id}/stream` 正则恒不命中 ⇒
-   * [readCurrentItemId] 恒 null ⇒ 永远退回起播那一条 ⇒ 连播时检测不到切集，
-   * 上一集不报 Stopped、新一集不报 Start，新一集的时间被以第一条的 itemId 写出去。
-   * 用户侧看到的就是「随机播放后首页继续观看不更新」。
-   *
-   * 返回 null 是正常情况（非 Emby 播放 / 列表还没就绪），此时退回路径反查。
+   * 本类拿不到 Compose 队列下标，重排或随机播放也会使 intent 原始顺序失效。
+   * 使用 `PlayerActivity.currentEmbyItemId()` 提供的当前队列身份，避免复制路径反查逻辑。
+   * 302 后的 CDN 路径不再含 Emby itemId，仅凭 URL 正则会把连播错误归到起播条目。
+   * 返回 null 表示列表尚未就绪，此时退回路径反查。
    */
   @Volatile
   var idProvider: (() -> String?)? = null
@@ -209,12 +199,8 @@ object EmbyPlaybackReporter {
       try {
         runCatching {
           val server = repository.getServer(sid) ?: return@runCatching
-          // ⚠️⚠️ 先用 **服务端签发的** 会话 id 再发 Start（v231）。
-          //   自生成的 UUID 服务端没有对应会话，位置照写（详情页有进度），但收尾那步
-          //   「盖最后播放时间」会被跳过 ⇒ 条目永远留在原来的位次上，刚播完也不往
-          //   「继续观看」前面走。Yamby 是先 PlaybackInfo 再上报，所以它播过的会到最前。
-          //   PlaybackInfo 失败就退回自生成的那个（v226 的老行为）：宁可时间戳不刷新，
-          //   也不能让整场上报断掉。
+          // 优先使用服务端签发的会话，使收尾上报能够更新最后播放时间。
+          // PlaybackInfo 失败时使用本地 UUID，保持整场上报连续。
           val issued = runCatching { repository.requestPlaybackSession(server, firstId) }
             .getOrNull()
           // 取会话期间页面可能已经被下一场接管（singleTask 复用），那就别再往下写了
@@ -249,7 +235,7 @@ object EmbyPlaybackReporter {
   /**
    * 播放页退出时调用：上报停止并结束轮询。
    *
-   * ## 调用时机（v227 起的约定）
+   * ## 调用时机
    *
    * **先 `onStop`、后 `onDestroy`**，两次都调，靠令牌去重：
    * - `onStop` 里只在「Activity 正在 finish」（返回手势 / 返回键 / 点关闭）时报一次 ——
@@ -472,15 +458,10 @@ object EmbyPlaybackReporter {
    * [start] 里那次 Start 是**异步发**的，网络抖动 / 服务端 5xx 都可能让它没送到。
    * 这种情况要补一次，否则服务端上这场播放「没开始过」，后续 Progress 无处归账。
    *
-   * ## ⚠️ 曾经的重大错误（v223~v225，用户报「退出后已观看 0%」）
-   *
-   * 那时用「`playSessionId` 是否为空」判断 Start 成没成功 —— 可 Emby 的
-   * `/Sessions/Playing` 正常就返回 **204 / 空 JSON，里面没有这个字段**，于是每次都判成
-   * 失败：每场只补一次，之后**整场一条 Progress 都不发**，Stopped 又只能拿
-   * `lastReportedTicks`（从没更新过 = 0）结账 ⇒ 服务端记成「已观看 0%，剩余 = 总时长」。
-   *
-   * 现在会话 id 由客户端自己生成（[newPlaySessionId]），所以**不存在**「空串」这个失败
-   * 信号；成败只看请求是否成功返回（[startAcknowledged]）。
+   * ## 成功判据
+   * `/Sessions/Playing` 可返回 204 或空 JSON；不能以响应是否带会话 id 判断成功。
+   * 会话 id 优先取服务端签发值，否则使用 [newPlaySessionId]；
+   * 请求是否成功返回由 [startAcknowledged] 记录。
    *
    * ## 约束
    *
@@ -654,7 +635,7 @@ object EmbyPlaybackReporter {
     }
 
     /**
-     * 退出播放页时**提前**报 Stopped（v227）。
+     * 退出播放页时提前报 Stopped。
      *
      * ## 为什么不能只靠 [onDestroy]
      *

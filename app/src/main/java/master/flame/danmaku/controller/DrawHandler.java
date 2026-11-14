@@ -125,11 +125,10 @@ public class DrawHandler extends Handler {
 
     private long mFrameUpdateRate = 16;
 
-    /** CineIsle v115：屏幕真实帧间隔（毫秒）。原库硬编码 16ms（=60Hz），
-     *  在 90/120Hz 屏上会让计时器每帧多加 8~11ms，持续超前真实时间。 */
+    /** 屏幕真实帧间隔（毫秒），避免固定 16ms 下限使高刷新率屏幕的计时器持续超前。 */
     private long mFrameIntervalMs = 16;
 
-    /** CineIsle v115：上一次 syncTimer 的真实时间戳，用于计算真实帧间隔。 */
+    /** 上一次 syncTimer 的真实时间戳，用于计算真实帧间隔。 */
     private long mLastSyncMS = 0;
 
     @SuppressWarnings("unused")
@@ -531,11 +530,8 @@ public class DrawHandler extends Handler {
                 d = gapTime;
                 gapTime = 0;
             } else if (gapTime <= 0) {
-                // CineIsle v115 修复：timer 已追上/超前真实时间（典型场景：90/120Hz 高刷屏，
-                // 真实帧间隔小于 mFrameUpdateRate）。原库此时仍按 max(mFrameUpdateRate, ...)
-                // 每帧至少推进 16ms ⇒ timer 持续超前真实时间（「时钟比」>1）
-                // ⇒ 弹幕寿命被等比例烧短（120Hz 上 9000ms 只活 ~4800ms 真实时间）。
-                // 修法：只按「上一帧到本帧的真实间隔」推进，永不超过真实增量。
+                // timer 已追上真实时间时按真实帧间隔推进，避免高刷新率屏幕的时钟持续超前。
+                // 增量仍受 mCordonTime 上限约束。
                 long realDelta = (mLastSyncMS > 0) ? (startMS - mLastSyncMS) : mFrameIntervalMs;
                 if (realDelta < 1) {
                     realDelta = 1;
@@ -574,9 +570,7 @@ public class DrawHandler extends Handler {
     }
 
     private void initRenderingConfigs() {
-        // CineIsle v115：按屏幕真实刷新率取帧间隔（原库硬编码 16ms = 60Hz 假设）。
-        // 120Hz 屏上 16ms 下限会让计时器每帧比真实时间多推进 ~8ms，
-        // 累积后「时钟比」>1，弹幕寿命被等比例烧短（9000ms 只活 ~4800ms 真实时间）。
+        // 按屏幕真实刷新率取帧间隔，避免 60Hz 假设缩短高刷新率屏幕上的实际弹幕寿命。
         long frameIntervalMs = 16;
         try {
             Context ctx = mDanmakuView != null ? mDanmakuView.getContext() : null;

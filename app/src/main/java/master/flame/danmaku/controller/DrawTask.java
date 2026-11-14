@@ -76,11 +76,11 @@ public class DrawTask implements IDrawTask {
 
     private boolean mRequestRender;
 
-    // ── CineIsle v115 诊断（节流 2s）───────────────────────────────────────
+    // ── 弹幕计时诊断（节流 2s）──────────────────────────────────────────
     // 判定「弹幕寿命短」的真实原因，看四个量：
     //   clock  时钟比（timer 增量 / 真实增量）：>1 ⇒ 计时器超前，寿命被等比例烧短
     //   maxDur  DrawTask.drawDanmakus 的取窗半径（danmakuList.sub(now-max, now+max)）
-    //   scroll  滚动弹幕 Duration：value=速度基准（吃 factor），life=寿命（v115 起不吃 factor）
+    //   scroll  滚动弹幕 Duration：value=速度基准（吃 factor），life=寿命（不吃 factor）
     //   win    本帧实际取窗区间 + 窗内条数
     private long mDiagLastRealMs = 0;
     private long mDiagLastTimerMs = 0;
@@ -384,7 +384,7 @@ public class DrawTask implements IDrawTask {
             }
 
             // prepare runningDanmakus to draw (in sync-mode)
-            // ── CineIsle v115 诊断日志（节流 2s）────────────────────────────
+            // ── 弹幕计时诊断日志（节流 2s）─────────────────────────────
             long diagReal = SystemClock.uptimeMillis();
             if (diagReal - mDiagLastRealMs > 2000) {
                 float clock = 0f;

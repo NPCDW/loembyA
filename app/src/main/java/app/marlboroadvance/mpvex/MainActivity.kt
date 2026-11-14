@@ -71,6 +71,11 @@ import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.runtime.rememberDecoratedNavEntries
 import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
 import app.marlboroadvance.mpvex.ui.browser.emby.EmbyServerGateway
+import app.marlboroadvance.mpvex.ui.browser.emby.EmbyPlaybackDetailFollower
+import app.marlboroadvance.mpvex.ui.browser.emby.preloadPlaybackDetail
+import app.marlboroadvance.mpvex.domain.emby.EmbyRepository
+import app.marlboroadvance.mpvex.domain.emby.playback.PlaybackSpec
+import app.marlboroadvance.mpvex.ui.player.LoembyPlaybackCoordinator
 import app.marlboroadvance.mpvex.ui.browser.emby.ServerBoundEntry
 import app.marlboroadvance.mpvex.ui.browser.emby.embyNavigationContentKey
 import app.marlboroadvance.mpvex.ui.browser.emby.nearestEmbyServerGateway
@@ -146,6 +151,8 @@ class MainActivity : ComponentActivity() {
   private val postgresConfigStorage by inject<PostgresConfigStorage>()
   private val postgresConnectionChecker by inject<PostgresConnectionChecker>()
   private val embyServerRepository by inject<EmbyServerRepository>()
+  private val embyRepository by inject<EmbyRepository>()
+  private val playbackCoordinator by inject<LoembyPlaybackCoordinator>()
   
   /**
    * 保存实例状态前的**体积闸门**。
@@ -511,6 +518,38 @@ class MainActivity : ComponentActivity() {
     ) {
       val compatibilityHome = rememberCompatibilityHomeGateway(typedBackstack)
       val serverStores = rememberServerNavigationStores(typedBackstack, compatibilityHome)
+      val detailFollower: EmbyPlaybackDetailFollower = viewModel(this@MainActivity, factory = viewModelFactory {
+        initializer { EmbyPlaybackDetailFollower() }
+      })
+      // Do not lifecycle-gate this collector: the player covers this Activity while changing episodes.
+      LaunchedEffect(typedBackstack, compatibilityHome, detailFollower) {
+        var preload: kotlinx.coroutines.Job? = null
+        var preloadedSpec: PlaybackSpec? = null
+        playbackCoordinator.loaded.collect { spec ->
+          if (spec?.detailOrigin !== preloadedSpec?.detailOrigin || spec?.itemId != preloadedSpec?.itemId) {
+            preload?.cancel()
+            preloadedSpec = spec
+          }
+          if (spec != null && detailFollower.followPlaybackDetail(
+              typedBackstack, spec, compatibilityHome,
+              isCurrent = { server ->
+                embyServerRepository.isCurrent(server) && runCatching {
+                  embyRepository.sessionServer(server)
+                }.isSuccess
+              },
+            )) {
+            preload = launch {
+              try {
+                preloadPlaybackDetail(spec, embyRepository)
+              } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+              } catch (_: Exception) {
+                // The detail retains its normal retry path; preloading never interrupts playback.
+              }
+            }
+          }
+        }
+      }
       // Position-aware entries avoid borrowing the last equal item route from another server.
       val entries = typedBackstack.mapIndexed { index, route ->
         val gateway = nearestEmbyServerGateway(typedBackstack, index)

@@ -29,7 +29,7 @@ class PlayerManifestExposureTest {
   @Test
   fun `mpv video activities are internal without external intent filters`() {
     val orientations = mapOf(
-      ".ui.player.PlayerActivity" to "locked",
+      ".ui.player.PlayerActivity" to "landscape",
       ".ui.player.feed.VerticalFeedActivity" to "sensorLandscape",
     )
     for ((name, orientation) in orientations) {
@@ -49,6 +49,19 @@ class PlayerManifestExposureTest {
   fun `removed GSY activity is absent while launcher stays portrait`() {
     assertFalse(activities().any { it.getAttributeNS(android, "name").contains("Gsy") })
     assertEquals("portrait", activity(".MainActivity").getAttributeNS(android, "screenOrientation"))
+  }
+
+  @Test
+  fun `all non playback activity pages are portrait`() {
+    activities().filterNot {
+      it.getAttributeNS(android, "name") in setOf(".ui.player.PlayerActivity", ".ui.player.feed.VerticalFeedActivity")
+    }.forEach { activity ->
+      assertEquals(
+        activity.getAttributeNS(android, "name"),
+        "portrait",
+        activity.getAttributeNS(android, "screenOrientation"),
+      )
+    }
   }
 
   @Test

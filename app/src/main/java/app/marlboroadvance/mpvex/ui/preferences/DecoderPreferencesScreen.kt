@@ -143,13 +143,8 @@ object DecoderPreferencesScreen : Screen {
 
               PreferenceDivider()
 
-              // 默认解码器（v218 起）：把「要不要硬解」从布尔开关升级成选项列表。
-              // v219 补上零拷贝档（HW+），并把原来的「直出模式」开关**收进来**：
-              // vo 与 hwdec 必须同源，分成两处必然出现「选了零拷贝、vo 还是 gpu」的组合，
-              // 那种组合 mpv 不报错、只是静默退回 copyback。
-              // v220 再补两档「自动检测」：不认识这些名词的人不必做选择题，
-              // 由 DecoderCapability 探测设备有没有硬解器来决定落点。
-              // 播放中面板里的那个「解码器」是实时读数，跟这里不是一件事。
+              // 解码器模式统一决定 vo 与 hwdec，避免零拷贝配上 gpu 而静默退回 copyback。
+              // 自动检测档由 DecoderCapability 探测硬解能力；播放面板的解码器读数是实时状态。
               val decoderMode by preferences.decoderMode.collectAsState()
               val capability by DecoderCapability.level.collectAsState()
               val hwDecoderCount by DecoderCapability.hardwareDecoderCount.collectAsState()

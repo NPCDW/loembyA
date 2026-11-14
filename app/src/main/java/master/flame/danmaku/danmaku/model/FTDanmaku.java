@@ -41,7 +41,7 @@ public class FTDanmaku extends BaseDanmaku {
     public void layout(IDisplayer displayer, float x, float y) {
         if (mTimer != null) {
             long deltaDuration = mTimer.currMillisecond - getActualTime();
-            // CineIsle v115：可见期判据改用 getLifetime()（不吃速度系数）。
+            // 可见期使用 getLifetime()，不受速度系数影响。
             if (deltaDuration > 0 && deltaDuration < duration.getLifetime()) {
                 if (!this.isShown()) {
                     this.x = getLeft(displayer);

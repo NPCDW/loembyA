@@ -25,8 +25,8 @@ class AppOrientationPolicyTest {
   }
 
   @Test
-  fun `mpv accepts only explicit portrait landscape or current lock`() {
-    assertEquals(ActivityInfo.SCREEN_ORIENTATION_LOCKED, AppOrientationPolicy.MPV)
+  fun `mpv accepts fixed orientations and otherwise defaults to landscape`() {
+    assertEquals(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE, AppOrientationPolicy.MPV)
     assertEquals(
       ActivityInfo.SCREEN_ORIENTATION_PORTRAIT,
       AppOrientationPolicy.constrainMpvRequest(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT),
@@ -88,6 +88,78 @@ class AppOrientationPolicyTest {
           AppOrientationPolicy.shouldEnterVideoFullscreen(landscape, pip, finishing, destroyed, fullscreen),
         )
       }
+  }
+
+  @Test
+  fun `missing invalid metadata stays landscape before native initialization`() {
+    val initial = PlayerOrientationState()
+    assertEquals(AppOrientationPolicy.MPV, initial.orientation)
+    assertEquals(PlayerOrientationState.Owner.DEFAULT, initial.owner)
+    val prepared = initial.prepareFile("version-a")
+    listOf(null to null, 0 to 1080, 1920 to -1).forEach { (width, height) ->
+      assertEquals(prepared, prepared.metadata("version-a", width, height))
+    }
+    assertEquals(prepared, prepared.metadata("other", 1080, 1920))
+    assertEquals(prepared, prepared.nativeAspect("version-a", 9.0 / 16.0))
+  }
+
+  @Test
+  fun `selected metadata is provisional until rotation corrected native geometry`() {
+    val provisional = PlayerOrientationState().prepareFile("version-a").metadata("version-a", 1920, 1080)
+    assertEquals(PlayerOrientationState.Owner.METADATA, provisional.owner)
+    val started = provisional.startFile("version-a")
+    assertEquals(provisional.orientation, started.orientation)
+    assertEquals(started, started.nativeAspect("version-a", 9.0 / 16.0))
+    val native = started.firstFrame("version-a").nativeAspect("version-a", 9.0 / 16.0)
+    assertEquals(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT, native.orientation)
+    assertEquals(PlayerOrientationState.Owner.NATIVE, native.owner)
+    assertEquals(native, native.metadata("version-a", 1920, 1080))
+    assertEquals(native, native.nativeAspect("other", 16.0 / 9.0))
+    assertEquals(native, native.nativeAspect("version-a", Double.NaN))
+    assertEquals(
+      ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE,
+      native.nativeAspect("version-a", 16.0 / 9.0).orientation,
+    )
+  }
+
+  @Test
+  fun `same item version switch and same url reload discard previous native authority`() {
+    val native = PlayerOrientationState().prepareFile("item-version-a").startFile("item-version-a")
+      .firstFrame("item-version-a").nativeAspect("item-version-a", 9.0 / 16.0)
+    for (identity in listOf("item-version-b", "item-version-a")) {
+      val pending = native.prepareFile(identity)
+      assertEquals(AppOrientationPolicy.MPV, pending.orientation)
+      assertFalse(pending.nativeStarted)
+      assertFalse(pending.nativeReady)
+      assertEquals(pending, pending.nativeAspect(identity, 9.0 / 16.0))
+      assertEquals(pending, pending.firstFrame(identity))
+    }
+    val repeatedStart = native.startFile("item-version-a")
+    assertEquals(AppOrientationPolicy.MPV, repeatedStart.orientation)
+    assertEquals(PlayerOrientationState.Owner.DEFAULT, repeatedStart.owner)
+    assertFalse(repeatedStart.nativeReady)
+  }
+
+  @Test
+  fun `late native restart cannot open geometry gate while preparing a new file`() {
+    val prepared = PlayerOrientationState().prepareFile("version-b")
+    assertEquals(prepared, prepared.firstFrame("version-b"))
+    assertEquals(prepared, prepared.firstFrame("version-a"))
+    val started = prepared.startFile("version-b")
+    assertEquals(started, started.firstFrame("version-a"))
+    assertEquals(started, started.nativeAspect("version-b", 9.0 / 16.0))
+  }
+
+  @Test
+  fun `manual orientation remains user owned across versions and native updates`() {
+    val manual = PlayerOrientationState().rotate()
+    assertEquals(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT, manual.orientation)
+    val next = manual.prepareFile("version-b").metadata("version-b", 1920, 1080).startFile("version-b")
+      .firstFrame("version-b").nativeAspect("version-b", 16.0 / 9.0)
+    assertEquals(manual.orientation, next.orientation)
+    assertEquals(PlayerOrientationState.Owner.MANUAL, next.owner)
+    assertEquals(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE, next.rotate().orientation)
+    assertFalse(next.stop().nativeReady)
   }
 
   private val orientationRequests = (-1..14).toList() + listOf(Int.MIN_VALUE, Int.MAX_VALUE)

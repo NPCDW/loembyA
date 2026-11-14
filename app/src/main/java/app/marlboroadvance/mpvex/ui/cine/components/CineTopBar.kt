@@ -82,9 +82,7 @@ fun CineTopBar(
         modifier = Modifier
           .fillMaxWidth()
           .height(space.topBarHeight)
-          // 设计稿 .topbar-mini：**浮起**的 18dp 圆角玻璃条，blur(20px) + `0 8px 26px` 投影，
-          // 不是贴满屏宽的实心栏。v131 之前这里是满宽 + 只画底边，收起来时像一条色带，
-          // 和设计稿「一张卡片浮在内容上」的感觉完全不同。
+          // 浮起的 18dp 圆角玻璃条，使用 20dp 模糊与 8dp 投影，而非贴满屏宽的实心栏。
           .cineGlass(shape = barShape, elevation = 8.dp, blurRadius = 20.dp)
           // 设计稿 .topbar-mini 的内边距是 `0 8px 0 16px`：文字侧宽、图标侧窄
           .padding(start = 16.dp, end = 8.dp),

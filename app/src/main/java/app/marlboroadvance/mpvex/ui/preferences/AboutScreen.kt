@@ -72,6 +72,7 @@ import app.marlboroadvance.mpvex.presentation.Screen
 import app.marlboroadvance.mpvex.presentation.crash.CrashActivity.Companion.collectDeviceInfo
 import app.marlboroadvance.mpvex.ui.utils.LocalBackStack
 import app.marlboroadvance.mpvex.utils.update.UpdateViewModel
+import app.marlboroadvance.mpvex.utils.update.LOEMBYA_PROJECT_URL
 import com.mikepenz.aboutlibraries.ui.compose.m3.LibrariesContainer
 import com.mikepenz.aboutlibraries.ui.compose.produceLibraries
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -93,7 +94,7 @@ object AboutScreen : Screen {
   @Composable
   override fun Content() {
     val context = LocalContext.current
-    val githubUrl = stringResource(R.string.github_repo_url)
+    val githubUrl = LOEMBYA_PROJECT_URL
     val backstack = LocalBackStack.current
     val clipboardManager = LocalClipboardManager.current
     val packageManager: PackageManager = context.packageManager
@@ -280,57 +281,24 @@ object AboutScreen : Screen {
 
               Spacer(modifier = Modifier.height(20.dp))
 
-              Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
+              Button(
+                onClick = {
+                  runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, githubUrl.toUri())) }
+                },
+                modifier = Modifier.fillMaxWidth().height(56.dp),
+                shape = RoundedCornerShape(16.dp),
+                colors = ButtonDefaults.buttonColors(
+                  containerColor = cs.primary,
+                  contentColor = cs.onPrimary,
+                ),
               ) {
-                val btnContainer = cs.primary
-                val btnContent = cs.onPrimary
-                Button(
-                  onClick = { backstack.add(LibrariesScreen) },
-                  modifier =
-                    Modifier
-                      .weight(1f)
-                      .height(56.dp),
-                  shape = RoundedCornerShape(16.dp),
-                  colors =
-                    ButtonDefaults.buttonColors(
-                      containerColor = btnContainer,
-                      contentColor = btnContent,
-                    ),
-                ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
                   Text(
-                    text = stringResource(id = R.string.pref_about_oss_libraries),
+                    text = stringResource(R.string.i18n_about_project_source),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                   )
-                }
-
-                Button(
-                  onClick = {
-                    context.startActivity(
-                      Intent(
-                        Intent.ACTION_VIEW,
-                        githubUrl.toUri(),
-                      ),
-                    )
-                  },
-                  modifier =
-                    Modifier
-                      .weight(1f)
-                      .height(56.dp),
-                  shape = RoundedCornerShape(16.dp),
-                  colors =
-                    ButtonDefaults.buttonColors(
-                      containerColor = btnContainer,
-                      contentColor = btnContent,
-                    ),
-                ) {
-                  Text(
-                    text = stringResource(id = R.string.i18n_about_upstream_project),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                  )
+                  Text(text = githubUrl, style = MaterialTheme.typography.bodySmall)
                 }
               }
 
@@ -383,8 +351,16 @@ object AboutScreen : Screen {
         )
 
         PreferenceCard {
-          ACKNOWLEDGMENTS.forEachIndexed { index, ack ->
-            if (index > 0) PreferenceDivider()
+          AcknowledgmentRow(
+            ack = Acknowledgment(
+              name = stringResource(R.string.pref_about_oss_libraries),
+              summaryRes = R.string.i18n_ack_licenses_summary,
+              url = "",
+            ),
+            onClick = { backstack.add(LibrariesScreen) },
+          )
+          ACKNOWLEDGMENTS.forEach { ack ->
+            PreferenceDivider()
             AcknowledgmentRow(
               ack = ack,
               onClick = {

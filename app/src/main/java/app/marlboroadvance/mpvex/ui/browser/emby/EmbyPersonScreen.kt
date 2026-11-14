@@ -274,7 +274,7 @@ data class EmbyPersonScreen(
       onDispose { personLifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    // ── 折叠态：滚过头部头像行后，顶栏下方浮出「头像 + 名字」的紧凑条（v159）──
+    // ── 折叠态：滚过头部头像行后，顶栏下方浮出「头像 + 名字」的紧凑条 ──
     //
     // 阈值取头像行的**实测高度**（`onGloballyPositioned`）而不是写死常量：
     // 语义是「大头像刚刚滚出视野」，早了会和下面的大头像同时出现、晚了中间会空一段。
@@ -295,9 +295,7 @@ data class EmbyPersonScreen(
 
     // ── 头部区块：头像行 / 两组筛选 / 搜索 + 排序 ──
     //
-    // v158：这一整块**不再钉在网格上方**，而是作为网格的第一个条目（跨满整行）
-    // 跟着海报一起滚走 —— 原先它一进页面就吃掉小半屏，用户滚不起来就只能看
-    // 半屏海报。与媒体详情页「Hero 往上滚就让位」是同一种手感。
+    // 头部作为网格的第一个条目跨满整行，跟随海报滚动，为作品内容让出视口。
     //
     // ⚠️ 横向内边距由 [hPad] 传入，不能写死：在网格里时网格自己已经有 12dp 的
     // contentPadding，这里再垫 16dp 会比下面的海报多缩进一截。
@@ -405,8 +403,7 @@ data class EmbyPersonScreen(
     Column(modifier = Modifier.fillMaxSize()) {
       TopAppBar(
         title = {
-          // 标题一直留着：v159 曾在紧凑条出现时置空，真机上「顶栏只剩图标」更难看
-          // v161：补「 - 作品」，名字过长时只缩名字 —— 尾巴单独成段、不带 weight，
+          // 保留标题。名字过长时只缩名字；「 - 作品」单独成段、不带 weight，
           // 先量、拿满自己的宽度，名字 `weight(fill = false)` 只吃剩下的。
           // 合成一个字符串交给单个 Text 不行：Ellipsis 会把尾巴一起削掉。
           Row(
@@ -446,8 +443,7 @@ data class EmbyPersonScreen(
         },
       )
 
-      // 头部的三块（头像行 / 两组筛选 / 搜索排序）已整体上移成 `headerContent`，
-      // 由网格作为第一个条目渲染 —— 这里不再固定占位（见 v158 说明）。
+      // 头部的头像、筛选与搜索排序由 `headerContent` 统一提供，作为网格第一项而非固定占位。
 
       Box(modifier = Modifier.fillMaxSize()) {
         when {
@@ -532,7 +528,7 @@ data class EmbyPersonScreen(
           }
         }
 
-        // ── 折叠态的紧凑条（v159）──
+        // ── 折叠态的紧凑条 ──
         // ⚠️ 压在内容上、**不占布局**：占位的话它一出现就把网格视口压矮 46dp，
         // 滚到一半的位置会跳一下；压在内容上位置完全不动。
         PersonCompactBar(
@@ -552,10 +548,10 @@ data class EmbyPersonScreen(
 }
 
 /**
- * 折叠态的「紧凑条」：头像 + 名字 + 回到顶部（v159 / v160 加回顶钮）。
+ * 折叠态的「紧凑条」：头像 + 名字 + 回到顶部。
  *
  * 它压在内容之上、**不占布局**：占位的话它一出现就把网格视口压矮 46dp，
- * 滚到一半的位置会跳一下。顶栏**不再**为它让位（v159 让过，真机上顶栏空着更难看）。
+ * 滚到一半的位置会跳一下。顶栏保留自己的标题，不为紧凑条让位。
  *
  * @param visible 只在「网格已经滚过头部头像行」时为 true
  * @param onBackToTop 回到网格顶部（调用方走 `ScrollToTop.kt` 的 `animateToTop`）

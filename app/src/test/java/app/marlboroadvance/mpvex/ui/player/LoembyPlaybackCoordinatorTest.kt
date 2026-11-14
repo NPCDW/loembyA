@@ -6,6 +6,7 @@ import app.marlboroadvance.mpvex.domain.emby.EmbyMediaStream
 import app.marlboroadvance.mpvex.domain.emby.EmbyServer
 import app.marlboroadvance.mpvex.domain.emby.displayTitle
 import app.marlboroadvance.mpvex.domain.emby.playback.LoopbackPlaybackInfo
+import app.marlboroadvance.mpvex.domain.emby.playback.PlaybackDetailOrigin
 import app.marlboroadvance.mpvex.domain.emby.playback.PlaybackScrobbleSession
 import app.marlboroadvance.mpvex.domain.emby.playback.PlaybackSpec
 import app.marlboroadvance.mpvex.domain.emby.playback.ResolvedPlayback
@@ -15,6 +16,7 @@ import app.marlboroadvance.mpvex.domain.postgres.playbackConfigurationForTest
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
@@ -52,6 +54,61 @@ class LoembyPlaybackCoordinatorTest {
     ))
     assertEquals(10L * 1024 * 1024, configured.cache.forward.bytesFor(8_000_000L))
     assertEquals(200L * 1024 * 1024, configured.cache.backward.bytesFor(null))
+  }
+
+  @Test fun cacheBudgetsControlStreamingHorizonAndFallbackWithoutShortTimeCaps() = runTest(dispatcher) {
+    val backend = Backend()
+    val mpv = Transport()
+    val owner = Any()
+    val coordinator = coordinator(backend)
+    coordinator.prepare(backend.url, mpv, Callbacks(), owner)
+    runCurrent()
+    assertEquals((300L * 1024 * 1024).toString(), mpv.strings["demuxer-max-bytes"])
+    assertEquals((200L * 1024 * 1024).toString(), mpv.strings["demuxer-max-back-bytes"])
+    assertEquals("1000000", mpv.strings["cache-secs"])
+    assertEquals("1000000", mpv.strings["demuxer-readahead-secs"])
+    mpv.strings["cache-secs"] = "45"
+    mpv.strings["demuxer-readahead-secs"] = "8"
+    coordinator.fileLoaded(owner)
+    runCurrent()
+    assertEquals("1000000", mpv.strings["cache-secs"])
+    assertEquals("1000000", mpv.strings["demuxer-readahead-secs"])
+    coordinator.finish("quit", owner)
+    runCurrent()
+  }
+
+  @Test fun selectedSourceBitrateConvertsConfiguredSecondsIntoByteBudgetsNotATimeCap() = runTest(dispatcher) {
+    val backend = Backend().apply {
+      sourceBitrate = 8_000_000L
+      cacheConfig = playbackConfigurationForTest(mapOf(
+        "mpv_cache_seconds" to "90",
+        "mpv_cache_min_bytes" to "2",
+        "mpv_cache_max_bytes" to "100",
+        "mpv_cache_back_seconds" to "20",
+        "mpv_cache_back_min_bytes" to "2",
+        "mpv_cache_back_max_bytes" to "100",
+      ))
+    }
+    val mpv = Transport()
+    val owner = Any()
+    val coordinator = coordinator(backend)
+    coordinator.prepare(backend.url, mpv, Callbacks(), owner)
+    runCurrent()
+    assertEquals("90000000", mpv.strings["demuxer-max-bytes"])
+    assertEquals("20000000", mpv.strings["demuxer-max-back-bytes"])
+    assertEquals("1000000", mpv.strings["cache-secs"])
+    assertEquals("1000000", mpv.strings["demuxer-readahead-secs"])
+    coordinator.finish("quit", owner)
+    runCurrent()
+  }
+
+  @Test fun cacheBudgetDiagnosticContainsNumericBudgetsBitrateAndEstimatedWindowsOnly() {
+    val diagnostic = LoembyPlaybackCoordinator.cacheBudgetDiagnostic(80_000_000, 40_000_000, 8_000_000)
+    assertTrue(diagnostic.contains("forwardBytes=80000000 backwardBytes=40000000 bitrateBps=8000000"))
+    assertTrue(diagnostic.contains("estimatedForwardSeconds=80.0 estimatedBackwardSeconds=40.0"))
+    assertTrue(diagnostic.contains("timeHorizonSeconds=1000000"))
+    assertFalse(diagnostic.contains("://"))
+    assertTrue(LoembyPlaybackCoordinator.cacheBudgetDiagnostic(1, 1, null).contains("bitrateBps=unknown"))
   }
 
   @Test fun completeInitializationThenTwoSecondReadThirtySecondReportAndStop() = runTest(dispatcher) {
@@ -225,6 +282,43 @@ class LoembyPlaybackCoordinatorTest {
     assertEquals(listOf("start"), backend.reports)
   }
 
+  @Test fun progressReportFailureIsLogOnlyAndStopReportStillSettles() = runTest(dispatcher) {
+    val backend = Backend().apply { reportProgressFailure = IllegalStateException("transport unavailable") }
+    val callbacks = Callbacks()
+    val owner = Any()
+    val coordinator = coordinator(backend)
+    coordinator.prepare(backend.url, Transport(), callbacks, owner)
+    runCurrent()
+    coordinator.fileLoaded(owner)
+    runCurrent()
+    advanceTimeBy(60_000)
+    runCurrent()
+    assertEquals(2, backend.reports.count { it == "progress" })
+    assertTrue(callbacks.errors.isEmpty())
+    assertTrue(callbacks.finishes.isEmpty())
+    assertTrue(coordinator.active.value!!.initialized)
+    coordinator.finish("quit", owner)
+    runCurrent()
+    assertEquals("stop", backend.reports.last())
+    assertEquals(1, backend.stopped)
+  }
+
+  @Test fun stopReportFailureKeepsExistingUserVisibleWarningPolicy() = runTest(dispatcher) {
+    val backend = Backend().apply { reportStopFailure = IllegalStateException("transport unavailable") }
+    val callbacks = Callbacks()
+    val owner = Any()
+    val coordinator = coordinator(backend)
+    coordinator.prepare(backend.url, Transport(), callbacks, owner)
+    runCurrent()
+    coordinator.fileLoaded(owner)
+    runCurrent()
+    coordinator.finish("quit", owner)
+    runCurrent()
+    assertEquals(listOf("start", "stop"), backend.reports)
+    assertTrue(callbacks.errors.contains("Emby 停止播放上报失败"))
+    assertEquals(1, backend.stopped)
+  }
+
   @Test fun scrobbleStartFailureWarnsButDoesNotTerminateOrSendScrobbleStop() = runTest(dispatcher) {
     val backend = Backend().apply { scrobbleStartFailure = IllegalStateException("tracker unavailable") }
     val callbacks = Callbacks()
@@ -246,27 +340,268 @@ class LoembyPlaybackCoordinatorTest {
     assertEquals(1, backend.stopped)
   }
 
+  @Test fun prepareDoesNotConfirmPlaybackBeforeFileLoaded() = runTest(dispatcher) {
+    val backend = Backend()
+    val spec = backend.spec(backend.url)!!.copy(detailOrigin = PlaybackDetailOrigin("detail-entry", "item"))
+    backend.fallbackSpec = spec
+    val owner = Any()
+    val coordinator = coordinator(backend)
+
+    assertNull(coordinator.loaded.value)
+    coordinator.fileLoaded(owner)
+    assertNull(coordinator.loaded.value)
+
+    coordinator.prepare(backend.url, Transport(), Callbacks(), owner)
+    assertSame(spec, coordinator.active.value!!.spec)
+    assertNull(coordinator.loaded.value)
+    runCurrent()
+    assertSame(spec, coordinator.active.value!!.resolved!!.spec)
+    assertNull(coordinator.loaded.value)
+    assertEquals(0, backend.started)
+
+    coordinator.finish("quit", owner)
+    runCurrent()
+    assertNull(coordinator.active.value)
+    assertNull(coordinator.loaded.value)
+  }
+
+  @Test fun immediateFinishBeforeHydrationRetainsConfirmedSpec() = runTest(dispatcher) {
+    for (reason in listOf("quit", "eof")) {
+      val backend = Backend()
+      val spec = backend.spec(backend.url)!!.copy(detailOrigin = PlaybackDetailOrigin("detail-entry", "item"))
+      backend.fallbackSpec = spec
+      val owner = Any()
+      val callbacks = Callbacks()
+      val coordinator = coordinator(backend)
+      coordinator.prepare(backend.url, Transport(), callbacks, owner)
+      runCurrent()
+
+      // Stay on Main so finish cannot yield to the hydration launched by fileLoaded.
+      withContext(Dispatchers.Main.immediate) {
+        coordinator.fileLoaded(owner)
+        assertSame(spec, coordinator.loaded.value)
+        assertNull(coordinator.active.value!!.item)
+        assertFalse(coordinator.active.value!!.initialized)
+        assertEquals(0, backend.started)
+        coordinator.finish(reason, owner)
+        assertNull(coordinator.active.value)
+        assertSame(spec, coordinator.loaded.value)
+      }
+      runCurrent()
+
+      assertEquals(0, backend.started)
+      assertEquals(0, backend.stopped)
+      assertSame(spec, coordinator.loaded.value)
+      assertEquals(listOf(if (reason == "eof") "end-of-playlist" else reason), callbacks.finishes)
+    }
+  }
+
+  @Test fun eofRetainsConfirmedSpecAfterActiveSessionClears() = runTest(dispatcher) {
+    val backend = Backend()
+    val spec = backend.spec(backend.url)!!.copy(detailOrigin = PlaybackDetailOrigin("detail-entry", "item"))
+    backend.fallbackSpec = spec
+    val owner = Any()
+    val callbacks = Callbacks()
+    val coordinator = coordinator(backend)
+    coordinator.prepare(backend.url, Transport(), callbacks, owner)
+    runCurrent()
+    coordinator.fileLoaded(owner)
+    assertSame(spec, coordinator.loaded.value)
+    runCurrent()
+    assertTrue(coordinator.active.value!!.initialized)
+
+    coordinator.eofReached(owner)
+    assertNull(coordinator.active.value)
+    assertSame(spec, coordinator.loaded.value)
+    runCurrent()
+    assertSame(spec, coordinator.loaded.value)
+    assertEquals(listOf("end-of-playlist"), callbacks.finishes)
+    assertEquals(1, backend.stopped)
+  }
+
+  @Test fun sameOriginEpisodePrepareRetainsLastConfirmedSpecUntilFileLoaded() = runTest(dispatcher) {
+    val backend = Backend()
+    val origin = PlaybackDetailOrigin("detail-entry", "episode-1")
+    val first = backend.spec(backend.url)!!.copy(
+      itemId = "episode-1",
+      itemType = "Episode",
+      seasonNumber = 1,
+      episodeNumber = 1,
+      playlistTotal = 2,
+      detailOrigin = origin,
+    )
+    backend.fallbackSpec = first
+    backend.itemOverride = EmbyItem(Id = first.itemId, Name = "Episode 1", Type = "Episode")
+    val owner = Any()
+    val transport = Transport()
+    val callbacks = Callbacks()
+    val coordinator = coordinator(backend)
+    coordinator.prepare(backend.url, transport, callbacks, owner)
+    runCurrent()
+    coordinator.fileLoaded(owner)
+    assertSame(first, coordinator.loaded.value)
+    runCurrent()
+    coordinator.eofReached(owner)
+    runCurrent()
+    assertNull(coordinator.active.value)
+    assertSame(first, coordinator.loaded.value)
+    assertEquals(listOf("next"), callbacks.finishes)
+
+    val next = first.copy(itemId = "episode-2", episodeNumber = 2, playlistIndex = 2)
+    backend.fallbackSpec = next
+    backend.itemOverride = EmbyItem(Id = next.itemId, Name = "Episode 2", Type = "Episode")
+    coordinator.prepare(backend.url, transport, callbacks, owner)
+    assertSame(next, coordinator.active.value!!.spec)
+    assertSame(first, coordinator.loaded.value)
+    runCurrent()
+    assertSame(next, coordinator.active.value!!.resolved!!.spec)
+    assertSame(first, coordinator.loaded.value)
+
+    coordinator.fileLoaded(Any())
+    assertSame(first, coordinator.loaded.value)
+    transport.path = "http://127.0.0.1:1234/stream/video/old"
+    coordinator.fileLoaded(owner)
+    assertSame(first, coordinator.loaded.value)
+    transport.path = backend.url
+    coordinator.fileLoaded(owner)
+    assertSame(next, coordinator.loaded.value)
+    runCurrent()
+    coordinator.finish("quit", owner)
+    runCurrent()
+    assertSame(next, coordinator.loaded.value)
+  }
+
+  @Test fun preparingEqualValuedNewOriginClearsConfirmedSpec() = runTest(dispatcher) {
+    val backend = Backend()
+    val origin = PlaybackDetailOrigin("detail-entry", "item")
+    val first = backend.spec(backend.url)!!.copy(detailOrigin = origin)
+    backend.fallbackSpec = first
+    val owner = Any()
+    val coordinator = coordinator(backend)
+    coordinator.prepare(backend.url, Transport(), Callbacks(), owner)
+    runCurrent()
+    coordinator.fileLoaded(owner)
+    runCurrent()
+    assertSame(first, coordinator.loaded.value)
+
+    val next = first.copy(detailOrigin = PlaybackDetailOrigin(origin.detailEntryId, origin.itemId))
+    backend.fallbackSpec = next
+    coordinator.prepare(backend.url, Transport(), Callbacks(), owner)
+    assertSame(next, coordinator.active.value!!.spec)
+    assertNull(coordinator.loaded.value)
+    runCurrent()
+    assertNull(coordinator.loaded.value)
+    coordinator.fileLoaded(owner)
+    assertSame(next, coordinator.loaded.value)
+    runCurrent()
+    coordinator.finish("quit", owner)
+    runCurrent()
+    assertSame(next, coordinator.loaded.value)
+  }
+
+  @Test fun nonDetailPrepareClearsConfirmedSpec() = runTest(dispatcher) {
+    val backend = Backend()
+    val first = backend.spec(backend.url)!!.copy(detailOrigin = PlaybackDetailOrigin("detail-entry", "item"))
+    backend.fallbackSpec = first
+    val owner = Any()
+    val coordinator = coordinator(backend)
+    coordinator.prepare(backend.url, Transport(), Callbacks(), owner)
+    runCurrent()
+    coordinator.fileLoaded(owner)
+    runCurrent()
+    assertSame(first, coordinator.loaded.value)
+    coordinator.finish("quit", owner)
+    runCurrent()
+    assertSame(first, coordinator.loaded.value)
+
+    val next = first.copy(detailOrigin = null)
+    backend.fallbackSpec = next
+    coordinator.prepare(backend.url, Transport(), Callbacks(), owner)
+    assertSame(next, coordinator.active.value!!.spec)
+    assertNull(coordinator.loaded.value)
+    runCurrent()
+    assertNull(coordinator.loaded.value)
+    coordinator.fileLoaded(owner)
+    assertSame(next, coordinator.loaded.value)
+    runCurrent()
+    coordinator.finish("quit", owner)
+    runCurrent()
+    assertSame(next, coordinator.loaded.value)
+
+    // Two null origins must not be treated as the same detail-launched queue.
+    coordinator.prepare(backend.url, Transport(), Callbacks(), owner)
+    assertNull(coordinator.loaded.value)
+    runCurrent()
+    assertNull(coordinator.loaded.value)
+    coordinator.finish("quit", owner)
+    runCurrent()
+    assertNull(coordinator.loaded.value)
+  }
+
+  @Test fun sameItemVersionPreparePreservesConfirmedSpecUntilFileLoaded() = runTest(dispatcher) {
+    val backend = Backend()
+    val first = backend.spec(backend.url)!!.copy(
+      selectPolicy = "manual",
+      versionSelect = 1,
+      explicitMediaSourceId = "version-1",
+      detailOrigin = PlaybackDetailOrigin("detail-entry", "item"),
+    )
+    backend.fallbackSpec = first
+    val owner = Any()
+    val coordinator = coordinator(backend)
+    coordinator.prepare(backend.url, Transport(), Callbacks(), owner)
+    runCurrent()
+    coordinator.fileLoaded(owner)
+    runCurrent()
+    assertSame(first, coordinator.loaded.value)
+
+    val next = first.copy(versionSelect = 2, explicitMediaSourceId = "version-2")
+    backend.fallbackSpec = next
+    coordinator.prepare(backend.url, Transport(), Callbacks(), owner)
+    assertSame(next, coordinator.active.value!!.spec)
+    assertSame(first, coordinator.loaded.value)
+    runCurrent()
+    assertSame(next, coordinator.active.value!!.resolved!!.spec)
+    assertSame(first, coordinator.loaded.value)
+    coordinator.fileLoaded(owner)
+    assertSame(next, coordinator.loaded.value)
+    runCurrent()
+    coordinator.finish("quit", owner)
+    runCurrent()
+    assertSame(next, coordinator.loaded.value)
+    assertEquals(2, coordinator.loaded.value!!.versionSelect)
+    assertEquals("version-2", coordinator.loaded.value!!.explicitMediaSourceId)
+  }
+
   @Test fun wrongOwnerAndWrongPathCannotInitializeOrStopSession() = runTest(dispatcher) {
     val backend = Backend()
+    val spec = backend.spec(backend.url)!!.copy(detailOrigin = PlaybackDetailOrigin("detail-entry", "item"))
+    backend.fallbackSpec = spec
     val mpv = Transport()
     val owner = Any()
     val coordinator = coordinator(backend)
     coordinator.prepare(backend.url, mpv, Callbacks(), owner)
     runCurrent()
     coordinator.fileLoaded(Any())
+    assertNull(coordinator.loaded.value)
     coordinator.finish("quit", Any())
     runCurrent()
+    assertNull(coordinator.loaded.value)
     assertEquals(0, backend.started)
     mpv.path = "http://127.0.0.1:1234/stream/video/old"
     coordinator.fileLoaded(owner)
+    assertNull(coordinator.loaded.value)
     runCurrent()
+    assertNull(coordinator.loaded.value)
     assertEquals(0, backend.started)
     mpv.path = backend.url
     coordinator.fileLoaded(owner)
+    assertSame(spec, coordinator.loaded.value)
     runCurrent()
     assertEquals(1, backend.started)
     coordinator.finish("quit", owner)
     runCurrent()
+    assertSame(spec, coordinator.loaded.value)
   }
 
   @Test fun eofLastEntrySettlesOnceAndRedirectDoesNotSave() = runTest(dispatcher) {
@@ -561,12 +896,16 @@ class LoembyPlaybackCoordinatorTest {
     private val config = playbackConfigurationForTest(source = PostgresSourceToken("source", 1), serverUuid = "server")
     private val resolved = ResolvedPlayback("test", 0, spec, source, LoopbackPlaybackInfo(listOf(source), "session"), 0, "http://127.0.0.1:1234/stream/video/test", config)
     private val item = EmbyItem(Id = "item", Name = "Test", Type = "Movie")
+    var sourceBitrate: Long? = null
+    var cacheConfig: PlaybackConfiguration? = null
     var itemOverride: EmbyItem? = null
     var itemFailure: Exception? = null
     var seriesFailure: Exception? = null
     var seriesReads = 0
     var historyStartFailure: Exception? = null
     var reportStartFailure: Exception? = null
+    var reportProgressFailure: Exception? = null
+    var reportStopFailure: Exception? = null
     var scrobbleStartFailure: Exception? = null
     var fallbackSpec: PlaybackSpec? = null
     var startedItem: EmbyItem? = null
@@ -580,7 +919,11 @@ class LoembyPlaybackCoordinatorTest {
     val reports = mutableListOf<String>()
     override fun spec(url: String): PlaybackSpec? = if (url == this.url) fallbackSpec ?: spec else null
     override fun matches(url: String, nativePath: String?): Boolean = nativePath == this.url
-    override suspend fun resolve(url: String): ResolvedPlayback = fallbackSpec?.let { resolved.copy(spec = it) } ?: resolved
+    override suspend fun resolve(url: String): ResolvedPlayback = resolved.copy(
+      spec = fallbackSpec ?: spec,
+      source = source.copy(Bitrate = sourceBitrate),
+      config = cacheConfig ?: config,
+    )
     override suspend fun item(resolved: ResolvedPlayback): EmbyItem = itemFailure?.let { throw it } ?: itemOverride ?: item
     override suspend fun series(resolved: ResolvedPlayback, id: String): EmbyItem {
       seriesReads++
@@ -596,7 +939,12 @@ class LoembyPlaybackCoordinatorTest {
     override suspend fun stopped(resolved: ResolvedPlayback, item: EmbyItem, seconds: Long) { stopped++; this.seconds = seconds }
     override suspend fun report(resolved: ResolvedPlayback, kind: String, ticks: Long) {
       reports += kind
-      if (kind == "start") reportStartFailure?.let { throw it }
+      when (kind) {
+        "start" -> reportStartFailure
+        "progress" -> reportProgressFailure
+        "stop" -> reportStopFailure
+        else -> null
+      }?.let { throw it }
     }
     override suspend fun audio(resolved: ResolvedPlayback, upstream: String): String = "http://127.0.0.1:1234/stream/audio/a"
     override suspend fun subtitle(resolved: ResolvedPlayback, upstream: String): String = "http://127.0.0.1:1234/subtitle/s"
