@@ -49,8 +49,24 @@ class FixedPlayerControlsContractTest {
     assertTrue(controls.contains("CachedTimelineCanvas("))
     assertTrue(viewModel.contains("_cacheTimelineNode.value = node"))
     assertTrue(seekbar.contains("timeline.cachedRanges.filter"))
-    assertTrue(seekbar.contains("TimelineIntervalKind.PlayedCached"))
+    assertTrue(seekbar.contains("TimelineIntervalKind.Cached"))
     assertFalse(seekbar.contains("PlayerLib.propNode[\"demuxer-cache-state\"]"))
+  }
+
+  @Test
+  fun `track drawing ignores playhead and does not overlap rounded interval caps`() {
+    val seekbar = source("app/marlboroadvance/mpvex/ui/player/controls/components/Seekbar.kt")
+    val classificationStart = seekbar.indexOf("internal fun classifyTimelineIntervals(")
+    val classificationEnd = seekbar.indexOf("@Composable", classificationStart)
+    val classification = seekbar.substring(classificationStart, classificationEnd)
+
+    assertFalse(classification.contains("position"))
+    assertTrue(seekbar.contains("classifyTimelineIntervals(timeline, total.toDouble())"))
+    assertTrue(seekbar.contains("clipPath(trackShape)"))
+    assertTrue(seekbar.contains("drawRect("))
+    assertTrue(seekbar.contains("CacheTimelineColors.colorFor(interval.kind)"))
+    assertFalse(seekbar.contains("StrokeCap.Round"))
+    assertTrue(seekbar.contains("center = Offset(size.width * pointFraction, centerY)"))
   }
 
   @Test

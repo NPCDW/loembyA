@@ -29,7 +29,9 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import okhttp3.ResponseBody
+import okio.Buffer
 import okio.BufferedSource
+import okio.Source
 import okio.buffer
 import okio.source
 import org.brotli.dec.BrotliInputStream
@@ -184,7 +186,7 @@ class LoopbackHttpPool {
       }
       val original = response.body
       val source = object : ResponseBody() {
-        private val decoded: BufferedSource by lazy {
+        private val decoded: Lazy<BufferedSource> = lazy {
           val input = original.byteStream()
           val stream: InputStream = when (encoding) {
             "gzip" -> GZIPInputStream(input)
@@ -202,9 +204,21 @@ class LoopbackHttpPool {
           }
           stream.source().buffer()
         }
+        // Closing a redirect or a failed decoder must not initialize or read its response body.
+        private val source = object : Source {
+          override fun read(sink: Buffer, byteCount: Long): Long = decoded.value.read(sink, byteCount)
+          override fun timeout() = original.source().timeout()
+          override fun close() {
+            try {
+              if (decoded.isInitialized()) decoded.value.close()
+            } finally {
+              original.close()
+            }
+          }
+        }.buffer()
         override fun contentType() = original.contentType()
         override fun contentLength() = -1L
-        override fun source() = decoded
+        override fun source() = source
       }
       return response.newBuilder()
         .removeHeader("Content-Encoding")

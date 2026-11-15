@@ -68,7 +68,7 @@ private fun validHttpTarget(value: String): Boolean = value.length <= MAX_URL_LE
 }.getOrDefault(false)
 
 /** Match normalized authorities too: OkHttp canonicalizes case/default ports between requests and responses. */
-private fun reverseTarget(value: String, prefix: String): String? {
+internal fun reverseTarget(value: String, prefix: String): String? {
   if (value.startsWith(prefix)) return value.removePrefix(prefix)
   val configured = prefix.toHttpUrlOrNull() ?: return null
   val target = value.toHttpUrlOrNull() ?: return null

@@ -5,7 +5,9 @@ import app.marlboroadvance.mpvex.domain.emby.EmbyItem
 import app.marlboroadvance.mpvex.domain.emby.EmbyMediaSourcePolicy
 import app.marlboroadvance.mpvex.domain.emby.EmbyRepository
 import app.marlboroadvance.mpvex.domain.emby.EmbyServer
+import app.marlboroadvance.mpvex.domain.emby.applyReverseProxyUrl
 import app.marlboroadvance.mpvex.domain.emby.requireSupportedConnection
+import app.marlboroadvance.mpvex.domain.emby.reverseTarget
 import app.marlboroadvance.mpvex.domain.postgres.PlaybackConfiguration
 import app.marlboroadvance.mpvex.domain.postgres.PlaybackConfigurationRepository
 import app.marlboroadvance.mpvex.domain.postgres.SubtitleCacheConfiguration
@@ -299,13 +301,22 @@ class LoopbackPlaybackServer internal constructor(
         return
       }
       val contentType = upstream.header("Content-Type").orEmpty().trim()
-      if (HLS_MIME.any(contentType::startsWith)) {
-        val text = withContext(Dispatchers.IO) { readLossy(upstream) }
-        val manifestUrl = logicalUpstreamUrl(server, upstream.request.url.toString())
-        val rewritten = rewriteHls(text, manifestUrl) { link ->
-          registerRequest(server, routeUpstream(server, link), "m3u8", request.owner, subtitle = false)
-        }
-        call.response.headers.append("Content-Type", contentType)
+      val hlsMime = contentType.substringBefore(';').trim().lowercase() in HLS_MIME
+      val hls = try {
+        hlsMime || withContext(Dispatchers.IO) { hasHlsHeader(upstream) }
+      } catch (cancelled: CancellationException) { throw cancelled }
+      catch (failure: Throwable) { return call.networkFailure(safeFailure(failure)) }
+      if (hls) {
+        val rewritten = try {
+          // A truncated manifest must never expose its unrewritten remote resource URLs.
+          val text = withContext(Dispatchers.IO) { upstream.body.source().readByteArray().toString(Charsets.UTF_8) }
+          val manifestUrl = logicalUpstreamUrl(server, upstream.request.url.toString())
+          rewriteHls(text, manifestUrl) { link ->
+            registerRequest(server, routeUpstream(server, link), "m3u8", request.owner, subtitle = false)
+          }
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (failure: Throwable) { return call.networkFailure(safeFailure(failure)) }
+        call.response.headers.append("Content-Type", if (hlsMime) contentType else "application/vnd.apple.mpegurl")
         call.rawBytes(rewritten.toByteArray(Charsets.UTF_8), status = HttpStatusCode.fromValue(upstream.code))
       } else {
         appendHeaders(call, upstream)
@@ -432,7 +443,10 @@ class LoopbackPlaybackServer internal constructor(
   }
 
   companion object {
-    private val HLS_MIME = listOf("application/vnd.apple.mpegurl", "application/x-mpegurl", "application/mpegurl", "audio/mpegurl")
+    private val HLS_MIME = setOf(
+      "application/vnd.apple.mpegurl", "application/x-mpegurl", "application/mpegurl", "audio/mpegurl", "audio/x-mpegurl",
+    )
+    private const val HLS_SNIFF_LIMIT = 512
     private val ABSOLUTE_LINK = Regex("https?://[^\\s<>\\\"']+")
     private val HLS_URI_ATTRIBUTE = Regex("(?i)(URI\\s*=\\s*\")([^\"]+)(\")")
     private fun invalidCerts(config: PlaybackConfiguration) = config.dangerAcceptInvalidCertificates
@@ -440,19 +454,13 @@ class LoopbackPlaybackServer internal constructor(
       if (server.reverseProxyId.isNotBlank() && server.reverseProxyId != "no")
         server.reverseProxyUrl.trim().let { if (it.endsWith('/')) it else "$it/" } else ""
     private fun reverseBase(server: EmbyServer) = reversePrefix(server) + server.baseUrl.removeSuffix("/emby")
-    private fun initialUrl(server: EmbyServer, url: String): String = if (url.startsWith("http")) url else reverseBase(server) + url
-    private fun routeUpstream(server: EmbyServer, absolute: String): String {
-      val prefix = reversePrefix(server)
-      if (prefix.isEmpty() || absolute.startsWith(prefix)) return absolute
-      val original = server.baseUrl.toHttpUrlOrNull() ?: return absolute
-      val target = absolute.toHttpUrlOrNull() ?: return absolute
-      return if (original.scheme == target.scheme && original.host == target.host && original.port == target.port) {
-        prefix + absolute
-      } else absolute
-    }
+    private fun initialUrl(server: EmbyServer, url: String): String =
+      if (url.toHttpUrlOrNull() != null) url else reverseBase(server) + url
+    private fun routeUpstream(server: EmbyServer, absolute: String): String =
+      applyReverseProxyUrl(absolute, reversePrefix(server))
     private fun logicalUpstreamUrl(server: EmbyServer, routed: String): String {
       val prefix = reversePrefix(server)
-      return if (prefix.isNotEmpty() && routed.startsWith(prefix)) routed.removePrefix(prefix) else routed
+      return if (prefix.isNotEmpty()) reverseTarget(routed, prefix) ?: routed else routed
     }
     private fun redactError(text: String, server: EmbyServer): String {
       var result = text
@@ -465,6 +473,23 @@ class LoopbackPlaybackServer internal constructor(
       failure is IOException && failure.message?.startsWith("HTTP ") == true -> failure.message!!
       else -> failure.javaClass.simpleName
     }
+    private fun hasHlsHeader(response: Response): Boolean = response.body.source().peek().use { peek ->
+      var count = 0
+      fun next(): Int {
+        if (count++ >= HLS_SNIFF_LIMIT) return -2
+        return if (peek.request(1)) peek.readByte().toInt() and 0xff else -1
+      }
+      var first = next()
+      if (first == 0xef) {
+        if (next() != 0xbb || next() != 0xbf) return false
+        first = next()
+      }
+      while (hlsWhitespace(first)) first = next()
+      if (first != '#'.code) return false
+      for (character in "EXTM3U") if (next() != character.code) return false
+      next().let { it == -1 || hlsWhitespace(it) }
+    }
+    private fun hlsWhitespace(value: Int): Boolean = value == 32 || value in 9..13
     private fun readLossy(response: Response): String {
       val bytes = java.io.ByteArrayOutputStream()
       val input = response.body.byteStream()
@@ -492,23 +517,34 @@ class LoopbackPlaybackServer internal constructor(
         val resolved = base.resolve(uri)?.toString() ?: throw IOException("Invalid HLS URI")
         return register(resolved)
       }
+      suspend fun proxyAbsoluteLinks(value: String): String {
+        val result = StringBuilder(value.length)
+        var cursor = 0
+        for (match in ABSOLUTE_LINK.findAll(value)) {
+          result.append(value, cursor, match.range.first)
+          result.append(proxy(match.value))
+          cursor = match.range.last + 1
+        }
+        return result.append(value, cursor, value.length).toString()
+      }
       // Rust str::lines drops the final empty line and treats CRLF as one line ending.
-      val lines = text.split('\n').let { if (it.lastOrNull() == "") it.dropLast(1) else it }
+      val lines = text.removePrefix("\uFEFF").trimStart().split('\n')
+        .let { if (it.lastOrNull() == "") it.dropLast(1) else it }
       return lines.map { raw ->
         val line = raw.removeSuffix("\r")
         if (line.isBlank()) line
-        else if (!line.startsWith("#")) proxy(line.trim())
+        else if (!line.trimStart().startsWith("#")) proxy(line.trim())
         else {
           val result = StringBuilder(line.length)
           var cursor = 0
           for (match in HLS_URI_ATTRIBUTE.findAll(line)) {
-            result.append(line, cursor, match.range.first)
+            result.append(proxyAbsoluteLinks(line.substring(cursor, match.range.first)))
             result.append(match.groupValues[1])
             result.append(proxy(match.groupValues[2]))
             result.append(match.groupValues[3])
             cursor = match.range.last + 1
           }
-          result.append(line, cursor, line.length).toString()
+          result.append(proxyAbsoluteLinks(line.substring(cursor))).toString()
         }
       }.joinToString("\n")
     }

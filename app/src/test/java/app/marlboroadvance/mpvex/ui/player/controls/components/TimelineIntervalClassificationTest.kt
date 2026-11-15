@@ -1,5 +1,6 @@
 package app.marlboroadvance.mpvex.ui.player.controls.components
 
+import androidx.compose.ui.graphics.Color
 import app.marlboroadvance.mpvex.ui.player.CacheTimeRange
 import app.marlboroadvance.mpvex.ui.player.CacheTimeline
 import org.junit.Assert.assertEquals
@@ -8,76 +9,41 @@ import org.junit.Test
 
 class TimelineIntervalClassificationTest {
   @Test
-  fun `cached interval crossing playhead splits into played and unplayed`() {
+  fun `track splits only at cache boundaries`() {
     assertEquals(
       listOf(
-        interval(0.0, 20.0, TimelineIntervalKind.PlayedUncached),
-        interval(20.0, 30.0, TimelineIntervalKind.PlayedCached),
-        interval(30.0, 40.0, TimelineIntervalKind.UnplayedCached),
-        interval(40.0, 70.0, TimelineIntervalKind.UnplayedUncached),
-        interval(70.0, 90.0, TimelineIntervalKind.UnplayedCached),
-        interval(90.0, 100.0, TimelineIntervalKind.UnplayedUncached),
+        interval(0.0, 20.0, TimelineIntervalKind.Uncached),
+        interval(20.0, 40.0, TimelineIntervalKind.Cached),
+        interval(40.0, 70.0, TimelineIntervalKind.Uncached),
+        interval(70.0, 90.0, TimelineIntervalKind.Cached),
+        interval(90.0, 100.0, TimelineIntervalKind.Uncached),
       ),
-      classifyTimelineIntervals(timeline(), 100.0, 30.0),
+      classifyTimelineIntervals(timeline(), 100.0),
     )
   }
 
   @Test
-  fun `uncached interval crossing playhead splits without changing cache membership`() {
-    assertEquals(
-      listOf(
-        interval(0.0, 20.0, TimelineIntervalKind.PlayedUncached),
-        interval(20.0, 40.0, TimelineIntervalKind.PlayedCached),
-        interval(40.0, 50.0, TimelineIntervalKind.PlayedUncached),
-        interval(50.0, 70.0, TimelineIntervalKind.UnplayedUncached),
-        interval(70.0, 90.0, TimelineIntervalKind.UnplayedCached),
-        interval(90.0, 100.0, TimelineIntervalKind.UnplayedUncached),
-      ),
-      classifyTimelineIntervals(timeline(), 100.0, 50.0),
-    )
-  }
-
-  @Test
-  fun `reverse seeks reclassify from current playhead not accumulated played history`() {
-    val timeline = timeline()
-    classifyTimelineIntervals(timeline, 100.0, 85.0)
-    val reversed = classifyTimelineIntervals(timeline, 100.0, 0.0)
-    assertTrue(reversed.all {
-      it.kind == TimelineIntervalKind.UnplayedCached || it.kind == TimelineIntervalKind.UnplayedUncached
-    })
-    assertEquals(
-      listOf(interval(0.0, 60.0, TimelineIntervalKind.PlayedUncached)),
-      classifyTimelineIntervals(CacheTimeline.fromMpv(null, 60.0), 60.0, 60.0),
-    )
-  }
-
-  @Test
-  fun `fully cached or fully uncached still split at playhead`() {
+  fun `fully cached or fully uncached track has one interval`() {
     val cached = CacheTimeline(60.0, listOf(CacheTimeRange(0.0, 60.0)), emptyList(), true, true)
     assertEquals(
-      listOf(
-        interval(0.0, 30.0, TimelineIntervalKind.PlayedCached),
-        interval(30.0, 60.0, TimelineIntervalKind.UnplayedCached),
-      ),
-      classifyTimelineIntervals(cached, 60.0, 30.0),
+      listOf(interval(0.0, 60.0, TimelineIntervalKind.Cached)),
+      classifyTimelineIntervals(cached, 60.0),
     )
     assertEquals(
-      listOf(
-        interval(0.0, 30.0, TimelineIntervalKind.PlayedUncached),
-        interval(30.0, 60.0, TimelineIntervalKind.UnplayedUncached),
-      ),
-      classifyTimelineIntervals(CacheTimeline.fromMpv(null, 60.0), 60.0, 30.0),
+      listOf(interval(0.0, 60.0, TimelineIntervalKind.Uncached)),
+      classifyTimelineIntervals(CacheTimeline.fromMpv(null, 60.0), 60.0),
     )
   }
 
   @Test
-  fun `positions clamp and exact boundaries never emit empty intervals`() {
-    for (position in listOf(20.0, 40.0, 70.0, 90.0, 100.0, -1.0, 200.0, Double.NaN)) {
-      val intervals = classifyTimelineIntervals(timeline(), 100.0, position)
-      assertTrue(intervals.all { it.startSeconds < it.endSeconds })
-      assertEquals(0.0, intervals.first().startSeconds, 0.0)
-      assertEquals(100.0, intervals.last().endSeconds, 0.0)
-      intervals.zipWithNext().forEach { (left, right) -> assertEquals(left.endSeconds, right.startSeconds, 0.0) }
+  fun `intervals cover the whole duration without gaps overlaps or empty segments`() {
+    val intervals = classifyTimelineIntervals(timeline(), 100.0)
+    assertTrue(intervals.all { it.startSeconds < it.endSeconds })
+    assertEquals(0.0, intervals.first().startSeconds, 0.0)
+    assertEquals(100.0, intervals.last().endSeconds, 0.0)
+    intervals.zipWithNext().forEach { (left, right) ->
+      assertEquals(left.endSeconds, right.startSeconds, 0.0)
+      assertTrue(left.kind != right.kind)
     }
   }
 
@@ -92,43 +58,79 @@ class TimelineIntervalClassificationTest {
     )
     assertEquals(
       listOf(
-        interval(0.0, 10.0, TimelineIntervalKind.PlayedUncached),
-        interval(10.0, 20.0, TimelineIntervalKind.UnplayedUncached),
-        interval(20.0, 40.0, TimelineIntervalKind.UnplayedCached),
-        interval(40.0, 60.0, TimelineIntervalKind.UnplayedUncached),
+        interval(0.0, 20.0, TimelineIntervalKind.Uncached),
+        interval(20.0, 40.0, TimelineIntervalKind.Cached),
+        interval(40.0, 60.0, TimelineIntervalKind.Uncached),
       ),
-      classifyTimelineIntervals(snapshot, 60.0, 10.0),
+      classifyTimelineIntervals(snapshot, 60.0),
     )
-  }
-
-  @Test
-  fun `cache eviction removes cached coloring on both sides of playhead`() {
-    classifyTimelineIntervals(timeline(), 100.0, 30.0)
-    val evicted = classifyTimelineIntervals(CacheTimeline.fromMpv(null, 100.0), 100.0, 30.0)
     assertEquals(
       listOf(
-        interval(0.0, 30.0, TimelineIntervalKind.PlayedUncached),
-        interval(30.0, 100.0, TimelineIntervalKind.UnplayedUncached),
+        interval(0.0, 20.0, TimelineIntervalKind.Uncached),
+        interval(20.0, 40.0, TimelineIntervalKind.Cached),
+        interval(40.0, 70.0, TimelineIntervalKind.Uncached),
+        interval(70.0, 100.0, TimelineIntervalKind.Cached),
       ),
-      evicted,
+      classifyTimelineIntervals(snapshot, 100.0),
     )
   }
 
   @Test
-  fun `all four states have distinct color lookup`() {
-    val colors = TimelineColorPalette("played-cached", "played-uncached", "unplayed-cached", "unplayed-uncached")
-    assertEquals("played-cached", colors.colorFor(TimelineIntervalKind.PlayedCached))
-    assertEquals("played-uncached", colors.colorFor(TimelineIntervalKind.PlayedUncached))
-    assertEquals("unplayed-cached", colors.colorFor(TimelineIntervalKind.UnplayedCached))
-    assertEquals("unplayed-uncached", colors.colorFor(TimelineIntervalKind.UnplayedUncached))
-    assertEquals(4, TimelineIntervalKind.entries.map(colors::colorFor).distinct().size)
+  fun `invalid overlapping and touching cached ranges do not produce extra seams`() {
+    val snapshot = CacheTimeline(
+      null,
+      listOf(
+        CacheTimeRange(40.0, 70.0),
+        CacheTimeRange(Double.NaN, 10.0),
+        CacheTimeRange(20.0, 50.0),
+        CacheTimeRange(25.0, 35.0),
+        CacheTimeRange(70.0, 120.0),
+        CacheTimeRange(5.0, 5.0),
+        CacheTimeRange(10.0, 5.0),
+        CacheTimeRange(10.0, Double.POSITIVE_INFINITY),
+      ),
+      emptyList(),
+      false,
+      false,
+    )
+    assertEquals(
+      listOf(
+        interval(0.0, 20.0, TimelineIntervalKind.Uncached),
+        interval(20.0, 100.0, TimelineIntervalKind.Cached),
+      ),
+      classifyTimelineIntervals(snapshot, 100.0),
+    )
+  }
+
+  @Test
+  fun `cache eviction removes cached coloring from the whole track`() {
+    val evicted = classifyTimelineIntervals(CacheTimeline.fromMpv(null, 100.0), 100.0)
+    assertEquals(listOf(interval(0.0, 100.0, TimelineIntervalKind.Uncached)), evicted)
+    assertTrue(evicted.all { CacheTimelineColors.colorFor(it.kind) == CacheTimelineColors.uncached })
+  }
+
+  @Test
+  fun `production palette uses exactly two whites based only on cache membership`() {
+    assertEquals(Color.White, CacheTimelineColors.colorFor(TimelineIntervalKind.Cached))
+    assertEquals(Color.White.copy(alpha = 0.20f), CacheTimelineColors.colorFor(TimelineIntervalKind.Uncached))
+    assertEquals(2, TimelineIntervalKind.entries.map(CacheTimelineColors::colorFor).distinct().size)
+    assertTrue(CacheTimelineColors.uncached.alpha < CacheTimelineColors.cached.alpha)
+
+    val intervals = classifyTimelineIntervals(timeline(), 100.0)
+    for (time in listOf(0.0, 10.0, 30.0, 50.0, 85.0, 95.0)) {
+      val kind = intervals.single { time >= it.startSeconds && time < it.endSeconds }.kind
+      val isCached = timeline().cachedRanges.any { time >= it.startSeconds && time < it.endSeconds }
+      assertEquals(
+        if (isCached) CacheTimelineColors.cached else CacheTimelineColors.uncached,
+        CacheTimelineColors.colorFor(kind),
+      )
+    }
   }
 
   @Test
   fun `invalid durations have no drawable intervals`() {
-    val timeline = CacheTimeline(null, emptyList(), emptyList(), false, false)
     for (duration in listOf(0.0, -1.0, Double.NaN, Double.POSITIVE_INFINITY)) {
-      assertTrue(classifyTimelineIntervals(timeline, duration, 0.0).isEmpty())
+      assertTrue(classifyTimelineIntervals(timeline(), duration).isEmpty())
     }
   }
 

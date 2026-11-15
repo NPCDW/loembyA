@@ -24,9 +24,13 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
@@ -43,12 +47,9 @@ import app.marlboroadvance.mpvex.ui.player.controls.LocalPlayerButtonsClickEvent
 import app.marlboroadvance.mpvex.ui.theme.spacing
 import `is`.xyz.mpv.Utils
 
-/** Played means before the current playhead, not accumulated playback history. */
 internal enum class TimelineIntervalKind {
-  PlayedCached,
-  PlayedUncached,
-  UnplayedCached,
-  UnplayedUncached,
+  Cached,
+  Uncached,
 }
 
 internal data class TimelineClassifiedInterval(
@@ -58,26 +59,25 @@ internal data class TimelineClassifiedInterval(
 )
 
 internal data class TimelineColorPalette<T>(
-  val playedCached: T,
-  val playedUncached: T,
-  val unplayedCached: T,
-  val unplayedUncached: T,
+  val cached: T,
+  val uncached: T,
+)
+
+internal val CacheTimelineColors = TimelineColorPalette(
+  cached = Color.White,
+  uncached = Color.White.copy(alpha = 0.20f),
 )
 
 internal fun <T> TimelineColorPalette<T>.colorFor(kind: TimelineIntervalKind): T = when (kind) {
-  TimelineIntervalKind.PlayedCached -> playedCached
-  TimelineIntervalKind.PlayedUncached -> playedUncached
-  TimelineIntervalKind.UnplayedCached -> unplayedCached
-  TimelineIntervalKind.UnplayedUncached -> unplayedUncached
+  TimelineIntervalKind.Cached -> cached
+  TimelineIntervalKind.Uncached -> uncached
 }
 
 internal fun classifyTimelineIntervals(
   timeline: CacheTimeline,
   durationSeconds: Double,
-  positionSeconds: Double,
 ): List<TimelineClassifiedInterval> {
   if (!durationSeconds.isFinite() || durationSeconds <= 0.0) return emptyList()
-  val position = if (positionSeconds.isFinite()) positionSeconds.coerceIn(0.0, durationSeconds) else 0.0
   // Derive the complement against today's duration, not a possibly stale snapshot duration.
   // Sorting/clamping also handles snapshots captured before native duration became available.
   val cached = timeline.cachedRanges.filter { it.startSeconds.isFinite() && it.endSeconds.isFinite() }
@@ -88,32 +88,22 @@ internal fun classifyTimelineIntervals(
     }.sortedBy { it.first }
 
   return buildList {
-    fun interval(start: Double, end: Double, isCached: Boolean) {
+    fun interval(start: Double, end: Double, kind: TimelineIntervalKind) {
       if (start >= end) return
-      val playedEnd = minOf(end, position)
-      if (start < playedEnd) {
-        add(TimelineClassifiedInterval(
-          start,
-          playedEnd,
-          if (isCached) TimelineIntervalKind.PlayedCached else TimelineIntervalKind.PlayedUncached,
-        ))
-      }
-      val unplayedStart = maxOf(start, position)
-      if (unplayedStart < end) {
-        add(TimelineClassifiedInterval(
-          unplayedStart,
-          end,
-          if (isCached) TimelineIntervalKind.UnplayedCached else TimelineIntervalKind.UnplayedUncached,
-        ))
+      val previous = lastOrNull()
+      if (previous != null && previous.kind == kind && previous.endSeconds == start) {
+        this[lastIndex] = previous.copy(endSeconds = end)
+      } else {
+        add(TimelineClassifiedInterval(start, end, kind))
       }
     }
     var cursor = 0.0
     for ((start, end) in cached) {
-      interval(cursor, start, isCached = false)
-      interval(maxOf(cursor, start), end, isCached = true)
+      interval(cursor, start, TimelineIntervalKind.Uncached)
+      interval(maxOf(cursor, start), end, TimelineIntervalKind.Cached)
       cursor = maxOf(cursor, end)
     }
-    interval(cursor, durationSeconds, isCached = false)
+    interval(cursor, durationSeconds, TimelineIntervalKind.Uncached)
   }
 }
 
@@ -228,31 +218,35 @@ internal fun CachedTimelineCanvas(
     val point = position.takeIf { it.isFinite() }?.coerceIn(0f, total) ?: 0f
     val pointFraction = if (total > 0f) point / total else 0f
 
-    val colors = TimelineColorPalette(
-      playedCached = Color.White,
-      playedUncached = Color.White.copy(alpha = 0.70f),
-      unplayedCached = Color.White.copy(alpha = 0.46f),
-      unplayedUncached = Color.White.copy(alpha = 0.20f),
-    )
-
-    if (total > 0f) {
-      classifyTimelineIntervals(timeline, total.toDouble(), point.toDouble()).forEach { interval ->
-        drawLine(
-          color = colors.colorFor(interval.kind),
-          start = Offset((interval.startSeconds / total * size.width).toFloat(), centerY),
-          end = Offset((interval.endSeconds / total * size.width).toFloat(), centerY),
-          strokeWidth = stroke,
-          cap = StrokeCap.Round,
+    val trackTop = centerY - stroke / 2f
+    val trackShape = Path().apply {
+      addRoundRect(RoundRect(
+        left = 0f,
+        top = trackTop,
+        right = size.width,
+        bottom = trackTop + stroke,
+        cornerRadius = CornerRadius(stroke / 2f),
+      ))
+    }
+    // Clip the whole track once; individual rounded caps would overlap and brighten seams.
+    clipPath(trackShape) {
+      if (total > 0f) {
+        classifyTimelineIntervals(timeline, total.toDouble()).forEach { interval ->
+          val startX = (interval.startSeconds / total * size.width).toFloat()
+          val endX = (interval.endSeconds / total * size.width).toFloat()
+          drawRect(
+            color = CacheTimelineColors.colorFor(interval.kind),
+            topLeft = Offset(startX, trackTop),
+            size = Size(endX - startX, stroke),
+          )
+        }
+      } else {
+        drawRect(
+          color = CacheTimelineColors.uncached,
+          topLeft = Offset(0f, trackTop),
+          size = Size(size.width, stroke),
         )
       }
-    } else {
-      drawLine(
-        color = colors.unplayedUncached,
-        start = Offset(0f, centerY),
-        end = Offset(size.width, centerY),
-        strokeWidth = stroke,
-        cap = StrokeCap.Round,
-      )
     }
     drawCircle(
       color = Color.White,
