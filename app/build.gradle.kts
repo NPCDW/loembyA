@@ -45,8 +45,8 @@ android {
     targetSdk = 36
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     // versionCode 决定能否覆盖安装：每发一版都要涨（APK 里的最终值 = versionCode * 10 + ABI 码）
-    versionCode = 239
-    versionName = "0.2.2"
+    versionCode = 240
+    versionName = "0.3.0"
 
     vectorDrawables {
       useSupportLibrary = true
@@ -401,6 +401,8 @@ dependencies {
     //   testImplementation  → JVM 单测（分页状态机、错误分类、正则筛选、排序…），秒级
     //   androidTestImplementation → Room 迁移测试（MigrationTestHelper 需要真 SQLite）
     testImplementation(libs.junit)
+    // Execute the app-owned stats Lua with a fake mpv API; never packaged in the APK.
+    testImplementation("org.luaj:luaj-jse:3.0.1")
     // JVM tests use desktop JNI, while production retains the Android-only AAR above.
     testRuntimeOnly("com.github.luben:zstd-jni:${libs.versions.zstd.get()}")
     testImplementation(libs.kotlinx.coroutines.test)

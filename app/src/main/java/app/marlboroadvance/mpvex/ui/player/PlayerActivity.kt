@@ -405,6 +405,12 @@ open class PlayerActivity :
   private var isUserFinishing = false
   private var isManualBackgroundPlayback = false // Track manual background playback trigger
   private var mpvInitialized = false // Track MPV initialization state
+  private var statisticsScriptFile: java.io.File? = null
+  private var statisticsReadyJob: kotlinx.coroutines.Job? = null
+  private val statisticsController = PlayerStatisticsController(
+    send = ::sendPlaybackStatisticsAction,
+    onUnavailable = { showPlayerToast(getString(app.marlboroadvance.mpvex.R.string.player_statistics_unavailable)) },
+  )
   private var savePlaybackStateJob: kotlinx.coroutines.Job? = null // Track ongoing save job
 
   // ==================== Background Playback ====================
@@ -549,6 +555,7 @@ open class PlayerActivity :
     // Add observer after initialization
     PlayerLib.addObserver(playerObserver)
     PlayerLib.observeProperty("volume", MPVLib.MpvFormat.MPV_FORMAT_DOUBLE)
+    loadPlaybackStatisticsScript()
 
     MediaPlaybackService.createNotificationChannel(this)
     setupAudio()
@@ -843,8 +850,50 @@ open class PlayerActivity :
     PlayerLib.setPropertyString("force-window", "yes")
   }
 
-  fun togglePlaybackStatistics() {
-    PlayerLib.command("script-binding", "stats/display-stats-toggle")
+  fun selectPlaybackStatisticsPage(page: PlayerStatisticsPage) {
+    if (!canDisplayPlaybackStatistics()) return
+    statisticsController.request(PlayerStatisticsAction.Show(page))
+  }
+
+  fun closePlaybackStatistics() {
+    if (!canControlPlaybackStatistics()) return
+    statisticsController.request(PlayerStatisticsAction.Hide)
+  }
+
+  private fun sendPlaybackStatisticsAction(action: PlayerStatisticsAction) {
+    if (!canControlPlaybackStatistics()) return
+    when (action) {
+      is PlayerStatisticsAction.Show -> {
+        if (!canDisplayPlaybackStatistics()) return
+        PlayerLib.command("script-message-to", "stats", PlayerStatisticsScript.SHOW_MESSAGE, action.page.number.toString())
+      }
+      PlayerStatisticsAction.Hide -> PlayerLib.command("script-message-to", "stats", PlayerStatisticsScript.HIDE_MESSAGE)
+    }
+  }
+
+  private fun canControlPlaybackStatistics(): Boolean =
+    mpvInitialized && PlayerLib.isCoreReady && !isFinishing && !isDestroyed && !player.isExiting
+
+  private fun canDisplayPlaybackStatistics(): Boolean {
+    if (!canControlPlaybackStatistics()) return false
+    val currentVo = PlayerLib.getPropertyString("current-vo") ?: PlayerLib.getPropertyString("vo")
+    if (currentVo == "mediacodec_embed") {
+      showPlayerToast(getString(app.marlboroadvance.mpvex.R.string.player_statistics_direct_output))
+      return false
+    }
+    return true
+  }
+
+  private fun loadPlaybackStatisticsScript() {
+    val script = statisticsScriptFile ?: return
+    statisticsController.beginLoading()
+    PlayerLib.setPropertyBoolean(PlayerStatisticsScript.READY_PROPERTY, false)
+    PlayerLib.observeProperty(PlayerStatisticsScript.READY_PROPERTY, MPVLib.MpvFormat.MPV_FORMAT_FLAG)
+    PlayerLib.command("load-script", script.absolutePath)
+    statisticsReadyJob = lifecycleScope.launch {
+      delay(5_000L)
+      if (canControlPlaybackStatistics()) statisticsController.onLoadTimeout()
+    }
   }
 
   fun showPlayerToast(message: String) {
@@ -1296,6 +1345,8 @@ open class PlayerActivity :
    * 反而更容易崩。所以这里保持同步 —— 区别是**从「盲等 100ms」变成「最多等 100ms，通常几毫秒就返回」**。
    */
   private fun cleanupMPV() {
+    statisticsReadyJob?.cancel()
+    statisticsController.stop()
     if (!mpvInitialized) return
 
     player.isExiting = true
@@ -1599,6 +1650,10 @@ open class PlayerActivity :
     // Copy essential files FIRST, before MPV initialization
     runCatching {
       Utils.copyAssets(this@PlayerActivity)
+      statisticsScriptFile = runCatching {
+        val content = assets.open(PlayerStatisticsScript.ASSET_PATH).use { it.readBytes() }
+        PlayerStatisticsScript.deploy(filesDir, content)
+      }.getOrNull()
       // 用户自建 mpv 目录（SAF）+ 字体目录同步。
       // 逻辑已抽到 MpvAssetSync（清单 1.5 拆分第 1 刀）—— 它是纯文件 IO，
       // 不碰任何播放器状态，留在 Activity 里只会挡住真正的初始化流程。
@@ -2007,6 +2062,12 @@ open class PlayerActivity :
     value: Boolean,
   ) {
     when (property) {
+      PlayerStatisticsScript.READY_PROPERTY -> {
+        if (value && canControlPlaybackStatistics()) {
+          statisticsReadyJob?.cancel()
+          statisticsController.onReady()
+        }
+      }
       "pause" -> {
         if (orientationState.nativeStarted) viewModel.onNativePause(value)
         handlePauseStateChange(value)

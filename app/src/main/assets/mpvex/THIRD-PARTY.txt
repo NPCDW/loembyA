@@ -1,0 +1,23 @@
+mpv Stats
+=========
+
+This directory contains the readable statistics script extracted from the
+application's existing libmpv.so: mpv v0.41.0-1072-g2a4eb8067,
+upstream player/lua/stats.lua, commit 2a4eb8067.
+
+Upstream: https://github.com/mpv-player/mpv
+Original stats project: https://github.com/Argon-/mpv-stats
+Authors: the mpv Stats authors and mpv contributors; see upstream git history.
+
+Distributed under the upstream default GNU General Public License, version 2
+or any later version. The complete license is in LICENSE.GPL and the upstream
+licensing explanation is in Copyright. The original script does not contain
+an individual copyright/license header; no separate LGPL-only grant is claimed.
+The script source is included as stats.lua, not compiled or obfuscated.
+
+Local modifications (2026-11-15): loembyA adds explicit resident show/hide
+messages, an initialization-ready marker, and shared statistics cleanup.
+The original statistics pages and keyboard interfaces are retained.
+
+This software is provided WITHOUT ANY WARRANTY; without even the implied
+warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.

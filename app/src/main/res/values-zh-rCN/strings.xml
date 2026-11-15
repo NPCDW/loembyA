@@ -449,6 +449,13 @@
   <string name="player_more_anime4k">Anime4K</string>
   <string name="player_more_audio_only">仅音频播放</string>
   <string name="player_more_statistics">统计信息</string>
+  <string name="player_statistics_page_default">1 · 文件 / 视频 / 音频信息</string>
+  <string name="player_statistics_page_frame_timings">2 · 帧耗时信息</string>
+  <string name="player_statistics_page_cache">3 · 缓存信息</string>
+  <string name="player_statistics_page_tracks">5 · 轨道信息</string>
+  <string name="player_statistics_close">关闭</string>
+  <string name="player_statistics_unavailable">统计不可用，请重新打开播放器</string>
+  <string name="player_statistics_direct_output">硬件解码+直出模式不支持 mpv 统计叠加层</string>
   <string name="player_more_no_versions">当前媒体没有其它版本</string>
   <string name="player_more_back">返回</string>
   <string name="player_more_anime4k_direct_output">硬件解码+直出模式不支持 Anime4K</string>

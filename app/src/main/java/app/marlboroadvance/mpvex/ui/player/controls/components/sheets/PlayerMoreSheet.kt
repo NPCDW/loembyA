@@ -4,6 +4,7 @@ import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -12,6 +13,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Equalizer
 import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.PlaylistPlay
@@ -37,9 +39,10 @@ import app.marlboroadvance.mpvex.domain.anime4k.Anime4KManager
 import app.marlboroadvance.mpvex.presentation.components.PlayerSheet
 import app.marlboroadvance.mpvex.ui.player.LoembyVersionOption
 import app.marlboroadvance.mpvex.ui.player.PlayerActivity
+import app.marlboroadvance.mpvex.ui.player.PlayerStatisticsPage
 import app.marlboroadvance.mpvex.ui.player.controls.isVersionsRowEnabled
 
-private enum class MorePage { Main, Versions, Anime4K }
+private enum class MorePage { Main, Versions, Anime4K, Statistics }
 
 @Composable
 fun PlayerMoreSheet(
@@ -68,10 +71,7 @@ fun PlayerMoreSheet(
           activity.requestBackgroundPlayback()
           onDismissRequest()
         },
-        onStatistics = {
-          activity.togglePlaybackStatistics()
-          onDismissRequest()
-        },
+        onStatistics = { page = MorePage.Statistics },
       )
       MorePage.Versions -> VersionMenu(
         versions = playback?.versions.orEmpty(),
@@ -90,6 +90,17 @@ fun PlayerMoreSheet(
           onDismissRequest()
         },
       )
+      MorePage.Statistics -> StatisticsPageMenu(
+        onBack = { page = MorePage.Main },
+        onSelect = {
+          activity.selectPlaybackStatisticsPage(it)
+          onDismissRequest()
+        },
+        onClose = {
+          activity.closePlaybackStatistics()
+          onDismissRequest()
+        },
+      )
     }
   }
 }
@@ -103,17 +114,36 @@ private fun MoreMenu(
   onAudioOnly: () -> Unit,
   onStatistics: () -> Unit,
 ) {
-  Column(Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
-    MoreRow(
-      Icons.Default.PlaylistPlay,
-      stringResource(R.string.player_more_versions),
-      onVersions,
-      enabled = versionsEnabled,
-    )
-    MoreRow(Icons.Default.RotateRight, stringResource(R.string.player_more_rotate), onRotate)
-    MoreRow(Icons.Outlined.AutoAwesome, stringResource(R.string.player_more_anime4k), onAnime4K)
-    MoreRow(Icons.Default.Headphones, stringResource(R.string.player_more_audio_only), onAudioOnly)
-    MoreRow(Icons.Default.Equalizer, stringResource(R.string.player_more_statistics), onStatistics)
+  LazyColumn(Modifier.fillMaxWidth(), contentPadding = PaddingValues(vertical = 12.dp)) {
+    item {
+      MoreRow(
+        Icons.Default.PlaylistPlay,
+        stringResource(R.string.player_more_versions),
+        onVersions,
+        enabled = versionsEnabled,
+      )
+    }
+    item { MoreRow(Icons.Default.RotateRight, stringResource(R.string.player_more_rotate), onRotate) }
+    item { MoreRow(Icons.Outlined.AutoAwesome, stringResource(R.string.player_more_anime4k), onAnime4K) }
+    item { MoreRow(Icons.Default.Headphones, stringResource(R.string.player_more_audio_only), onAudioOnly) }
+    item { MoreRow(Icons.Default.Equalizer, stringResource(R.string.player_more_statistics), onStatistics) }
+  }
+}
+
+@Composable
+private fun StatisticsPageMenu(
+  onBack: () -> Unit,
+  onSelect: (PlayerStatisticsPage) -> Unit,
+  onClose: () -> Unit,
+) {
+  Column(Modifier.fillMaxWidth()) {
+    SubmenuHeader(stringResource(R.string.player_more_statistics), onBack)
+    LazyColumn {
+      items(PlayerStatisticsPage.entries, key = { it.number }) { page ->
+        MoreRow(Icons.Default.Equalizer, stringResource(page.titleRes), onClick = { onSelect(page) })
+      }
+      item { MoreRow(Icons.Default.Close, stringResource(R.string.player_statistics_close), onClose) }
+    }
   }
 }
 

@@ -46,7 +46,12 @@ class PlayerObserver(
   ) {
     if (activity.player.isExiting) return
     val generation = activity.playbackEventGeneration
-    activity.runOnUiThread { if (generation == activity.playbackEventGeneration) guard("props:$property") { activity.onObserverEvent(property, value) } }
+    activity.runOnUiThread {
+      // Script readiness belongs to this core, not the file that happened to start loading.
+      if (property == PlayerStatisticsScript.READY_PROPERTY || generation == activity.playbackEventGeneration) {
+        guard("props:$property") { activity.onObserverEvent(property, value) }
+      }
+    }
   }
 
   override fun eventProperty(

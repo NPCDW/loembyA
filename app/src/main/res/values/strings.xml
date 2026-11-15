@@ -460,6 +460,13 @@
   <string name="player_more_anime4k">Anime4K</string>
   <string name="player_more_audio_only">Audio-only playback</string>
   <string name="player_more_statistics">Statistics</string>
+  <string name="player_statistics_page_default">1 · File / video / audio</string>
+  <string name="player_statistics_page_frame_timings">2 · Frame timings</string>
+  <string name="player_statistics_page_cache">3 · Cache information</string>
+  <string name="player_statistics_page_tracks">5 · Track information</string>
+  <string name="player_statistics_close">Close</string>
+  <string name="player_statistics_unavailable">Statistics are unavailable. Reopen the player and try again.</string>
+  <string name="player_statistics_direct_output">Direct-output hardware decoding does not support mpv statistics overlays</string>
   <string name="player_more_no_versions">No other versions are available</string>
   <string name="player_more_back">Back</string>
   <string name="player_more_anime4k_direct_output">Anime4K is unavailable with direct-output hardware decoding</string>

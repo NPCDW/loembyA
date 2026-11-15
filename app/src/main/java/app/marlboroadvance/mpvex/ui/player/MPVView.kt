@@ -126,6 +126,8 @@ class MPVView(
   var aid: Int by TrackDelegate("aid")
 
   override fun initOptions() {
+    // The app loads the same-version stats script with explicit touch show/hide handlers.
+    MPVLib.setOptionString("load-stats-overlay", "no")
     val profile = decoderPreferences.profile.get()
     MPVLib.setOptionString("profile", profile)
 
