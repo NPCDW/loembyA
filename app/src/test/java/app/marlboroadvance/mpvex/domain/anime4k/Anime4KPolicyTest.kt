@@ -272,15 +272,23 @@ class Anime4KPolicyTest {
   }
 
   @Test
-  fun `decoder setting enables Anime4K without persistently disabling gpu next`() {
-    val source = sequenceOf(
-      File("src/main/java/app/marlboroadvance/mpvex/ui/preferences/DecoderPreferencesScreen.kt"),
-      File("app/src/main/java/app/marlboroadvance/mpvex/ui/preferences/DecoderPreferencesScreen.kt"),
+  fun `Anime4K is controlled in player rather than decoder settings without changing decoder preference`() {
+    fun source(name: String): String = sequenceOf(
+      File("src/main/java/app/marlboroadvance/mpvex/$name"),
+      File("app/src/main/java/app/marlboroadvance/mpvex/$name"),
     ).first { it.isFile }.readText()
-    val anime4kSwitch = source.substringAfter("val enableAnime4K by").substringBefore("PreferenceDivider()")
+    val settings = source("ui/preferences/DecoderPreferencesScreen.kt")
+    val menu = source("ui/player/controls/components/sheets/PlayerMoreSheet.kt")
+    val activity = source("ui/player/PlayerActivity.kt")
+    val applyMode = activity.substringAfter("fun applyAnime4KMode(").substringBefore("fun applyAnime4KQuality(")
 
-    assertTrue(anime4kSwitch.contains("onValueChange = preferences.enableAnime4K::set"))
-    assertFalse(anime4kSwitch.contains("preferences.gpuNext.set(false)"))
+    assertFalse(settings.contains("val enableAnime4K by"))
+    assertFalse(settings.contains("onValueChange = preferences.enableAnime4K::set"))
+    assertTrue(menu.contains("activity.applyAnime4KMode(mode)"))
+    assertTrue(applyMode.contains("decoderPreferences.enableAnime4K.set(true)"))
+    assertTrue(applyMode.contains("decoderPreferences.anime4kMode.set(mode.name)"))
+    assertFalse(applyMode.contains("decoderPreferences.gpuNext.set(false)"))
+    assertTrue(settings.contains("pref_anime4k_incompatibility"))
   }
 
   private fun assertChains(

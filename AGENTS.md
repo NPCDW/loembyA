@@ -16,7 +16,7 @@
 ## Startup contract
 
 - Preserve `App.onCreate()` ordering: boot markers and approved legacy preference cleanup precede Koin construction; the loopback playback server starts only after DI is ready; crash handling, caches/native thumbnail initialization, and decoder probing follow their existing guarded paths.
-- Preserve the MainActivity composition gate: `MpvexTheme`/surface -> `AppLockGate` -> activity-scoped PostgreSQL setup and validation -> `Navigator`. Do not compose media navigation or start shared-data foreground refresh before the PostgreSQL gate passes.
+- Preserve the MainActivity composition gate: `MpvexTheme`/surface -> activity-scoped PostgreSQL setup and validation -> `Navigator`. Do not compose media navigation or start shared-data foreground refresh before the PostgreSQL gate passes.
 - The branded splash is an overlay on the current gate, not a bypass. `App.markBootOk()` marks the first rendered composition, not successful entry into the media home.
 
 ## Data ownership and mutation boundaries

@@ -3,7 +3,6 @@ package app.marlboroadvance.mpvex.di
 import app.marlboroadvance.mpvex.database.repository.PostgresPlaybackHistoryRepository
 import app.marlboroadvance.mpvex.domain.postgres.JdbcPostgresPlaybackHistoryMarkWriter
 import app.marlboroadvance.mpvex.domain.postgres.PostgresPlaybackHistoryMarkWriter
-import app.marlboroadvance.mpvex.database.MpvExDatabase
 import app.marlboroadvance.mpvex.domain.postgres.JdbcPostgresConnectionChecker
 import app.marlboroadvance.mpvex.domain.postgres.JdbcPostgresExecutor
 import app.marlboroadvance.mpvex.domain.postgres.PostgresExecutor
@@ -13,7 +12,6 @@ import app.marlboroadvance.mpvex.domain.postgres.PostgresConnectionChecker
 import app.marlboroadvance.mpvex.domain.postgres.SharedConfigurationRepository
 import app.marlboroadvance.mpvex.preferences.AdvancedPreferences
 import app.marlboroadvance.mpvex.preferences.AppearancePreferences
-import app.marlboroadvance.mpvex.preferences.AppLockPreferences
 import app.marlboroadvance.mpvex.preferences.AudioPreferences
 import app.marlboroadvance.mpvex.preferences.BrowserPreferences
 import app.marlboroadvance.mpvex.preferences.DanmakuPreferences
@@ -39,9 +37,8 @@ val PreferencesModule =
     singleOf(::SubtitlesPreferences)
     singleOf(::AudioPreferences)
     singleOf(::AdvancedPreferences)
-    single { BrowserPreferences(get(), androidContext()) }
+    singleOf(::BrowserPreferences)
     singleOf(::DanmakuPreferences)
-    singleOf(::AppLockPreferences)
     single { PostgresConfigStore(androidContext()) }.bind(PostgresConfigStorage::class)
     single { JdbcPostgresConnectionChecker() }.bind(PostgresConnectionChecker::class)
     single { JdbcPostgresExecutor(get()) }.bind(PostgresExecutor::class)

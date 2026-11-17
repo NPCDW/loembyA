@@ -125,15 +125,13 @@ import app.marlboroadvance.mpvex.domain.emby.EmbyUserData
 import app.marlboroadvance.mpvex.domain.emby.EmbyVersionProgress
 import app.marlboroadvance.mpvex.domain.emby.EmbyClient
 import app.marlboroadvance.mpvex.domain.emby.MediaInfoEntry
-import app.marlboroadvance.mpvex.domain.emby.MediaSourcePreference
 import app.marlboroadvance.mpvex.domain.emby.buildEmbyMediaInfoEntries
 import app.marlboroadvance.mpvex.domain.emby.effectiveEmbyMediaSourceId
 import app.marlboroadvance.mpvex.domain.emby.displayTitle
 import app.marlboroadvance.mpvex.domain.emby.embyMediaSourceLabel
 import app.marlboroadvance.mpvex.domain.emby.formatEmbyDurationFull
+import app.marlboroadvance.mpvex.domain.emby.playback.LoembyMediaSelection
 import app.marlboroadvance.mpvex.domain.playbackstate.repository.PlaybackStateRepository
-import app.marlboroadvance.mpvex.preferences.BrowserPreferences
-import app.marlboroadvance.mpvex.preferences.preference.collectAsState
 import app.marlboroadvance.mpvex.presentation.Screen
 import app.marlboroadvance.mpvex.presentation.components.ConfirmDialog
 import app.marlboroadvance.mpvex.presentation.components.pullrefresh.PullRefreshBox
@@ -203,7 +201,7 @@ data class EmbyDetailScreen(
     var playLaunching by remember { mutableStateOf(false) }
 
     // ── 多版本媒体：当前选中的版本 ──
-    // null = 还没选，等价于「服务端默认版本」（= MediaSources 的第一条）。
+    // null = 还没手动选，跟随共享 automaticVersionPolicy。
     // 按 itemId 记忆：同一条目在页面存活期间保留选择，换条目则重置。
     var selectedMediaSourceId by remember(itemId) { mutableStateOf<String?>(null) }
 
@@ -214,21 +212,30 @@ data class EmbyDetailScreen(
     // null = 不覆盖（单版本条目 / 本地还没按版本记过进度 ⇒ 沿用服务端进度）。
     var versionResumeSeconds by remember(itemId) { mutableStateOf<Long?>(null) }
     val playbackStateRepository = koinInject<PlaybackStateRepository>()
-    // 「多版本优先选择」规则：用户在播放入口（含按版本存续播进度）
-    // 没手动选版本时据此自动挑。用 .get() 而不是 collectAsState 是**刻意的**：
-    // 这是一次性取值（点播放的那一刻决定用哪个版本），不需要在改设置时让整页重组。
-    // ⚠️ 位置很要紧：下面的 LaunchedEffect 与后面的播放/媒体信息都要用它，
-    // Kotlin 属性按源码顺序初始化（红线 17），定义晚了这里会拿到 null。
-    val browserPrefsForSource = koinInject<BrowserPreferences>()
-    val autoSourcePreference =
-      remember(browserPrefsForSource.embyMediaSourcePreference.get()) {
-        MediaSourcePreference.fromKey(browserPrefsForSource.embyMediaSourcePreference.get())
+    // Generic fallback details use the same typed shared version policy as the playback loopback server.
+    var automaticVersionPolicy by remember(server) { mutableStateOf<String?>(null) }
+    var playbackConfigurationError by remember(server) { mutableStateOf<String?>(null) }
+    var playbackConfigurationRetry by remember(server) { mutableStateOf(0) }
+    LaunchedEffect(server, item?.Type, playbackConfigurationRetry) {
+      automaticVersionPolicy = null
+      playbackConfigurationError = null
+      val currentServer = server ?: return@LaunchedEffect
+      val current = item ?: return@LaunchedEffect
+      if (current.Type?.lowercase() in listOf("series", "season", "episode", "movie")) return@LaunchedEffect
+      try {
+        automaticVersionPolicy = viewModel.loadEpisodePlaybackConfiguration(currentServer).automaticVersionPolicy
+      } catch (failure: kotlinx.coroutines.CancellationException) {
+        throw failure
+      } catch (_: Exception) {
+        playbackConfigurationError = "播放选择配置加载失败"
       }
-    LaunchedEffect(itemId, selectedMediaSourceId, item, server?.id) {
+    }
+    LaunchedEffect(itemId, selectedMediaSourceId, item, server?.id, automaticVersionPolicy) {
       val current = item
       val currentServer = server
+      val policy = automaticVersionPolicy
       versionResumeSeconds =
-        if (current == null || currentServer == null) {
+        if (current == null || currentServer == null || policy == null) {
           null
         } else {
           loadVersionResumeSeconds(
@@ -236,7 +243,7 @@ data class EmbyDetailScreen(
             serverId = currentServer.id,
             item = current,
             selectedMediaSourceId = selectedMediaSourceId,
-            preference = autoSourcePreference,
+            automaticVersionPolicy = policy,
           )
         }
     }
@@ -318,11 +325,6 @@ data class EmbyDetailScreen(
     // DetailBody **外面**（PullRefreshBox 包着它），而「封面收着的时候禁止下拉刷新」
     // 这个判断需要读到折叠进度。详见下面 PullRefreshBox 处的注释。
     val listState = rememberLazyListState()
-    // 详情页推荐区开关：关闭后「推荐」与「同类型推荐」两块整块不渲染，也不发那几次请求。
-    val recommendPreferences = koinInject<BrowserPreferences>()
-    val showRecommendations by recommendPreferences.embyShowRecommendations.collectAsState()
-    /** 「同类型推荐」每次进入是否随机挑一个类型（关掉则固定用第一个类型）。 */
-    val randomGenreRecommend by recommendPreferences.embyRandomGenreRecommend.collectAsState()
     // 折叠状态：**只是列表滚动位置的函数**（没有任何自定义手势 / 动画状态）。
     val collapse = rememberHeaderCollapse(
       listState = listState,
@@ -348,8 +350,7 @@ data class EmbyDetailScreen(
     // Episode 使用共用页面的当前季分页，不再查询旧的相关分集与演员作品。
     val relatedEpisodes = RelatedEpisodes()
 
-    LaunchedEffect(itemId, item?.Id, server?.id, showRecommendations, recommendReloadKey) {
-      if (!showRecommendations) return@LaunchedEffect
+    LaunchedEffect(itemId, item?.Id, server?.id, recommendReloadKey) {
       val current = item ?: return@LaunchedEffect
       if (current.Type in listOf("Series", "Season", "Episode", "Movie")) return@LaunchedEffect
       val currentServer = server ?: return@LaunchedEffect
@@ -379,15 +380,8 @@ data class EmbyDetailScreen(
             loadRecommendations(item = current, server = currentServer, viewModel = viewModel)
         }
         launch {
-          val genres = current.Genres
-          // 候选类型：随机开关打开 → 本片类型打乱后的顺序；关闭 → 只用第一个。
-          // 打乱放在这里（effect 每次按上面的键重跑一次），于是「每次进页面 / 每次下拉刷新
-          // 都换一批类型」，而滚动期间不会变。
-          val candidates = when {
-            genres.isEmpty() -> emptyList()
-            randomGenreRecommend -> genres.shuffled()
-            else -> listOf(genres.first())
-          }
+          // Shuffle genres once per visit/refresh, never when a lazy recommendation row recomposes.
+          val candidates = current.Genres.shuffled()
           // 逐个试：随机挑到的冷门类型可能查不到同类，命中第一个有结果的就停
           for (g in candidates) {
             val found = loadGenreRecommendations(currentServer, g, current.Id)
@@ -448,11 +442,25 @@ data class EmbyDetailScreen(
             )
             return@Box
           }
-          // 多版本媒体：真正要播放的版本 Id。只有存在多个版本时才非空 ——
-          // 单版本媒体一律 null，播放链路与改动前完全一致。
-          // 用户没在下拉框里选过时，按设置里的「多版本优先选择」规则自动挑。
-          val playSourceId =
-            effectiveEmbyMediaSourceId(current, selectedMediaSourceId, autoSourcePreference)
+          if (!current.Type.equals("Series", ignoreCase = true) && automaticVersionPolicy == null) {
+            val configurationError = playbackConfigurationError
+            if (configurationError == null) {
+              Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                app.marlboroadvance.mpvex.ui.theme.AppLoadingIndicator()
+              }
+            } else {
+              EmbyEmptyState(
+                message = configurationError,
+                buttonText = "重试",
+                onAction = { playbackConfigurationRetry++ },
+                isError = true,
+                modifier = Modifier.align(Alignment.Center),
+              )
+            }
+            return@Box
+          }
+          val policy = automaticVersionPolicy ?: "high-resolution"
+          val playSourceId = effectiveEmbyMediaSourceId(current, selectedMediaSourceId, policy)
           // 版本显示名（与下拉框里显示的**一模一样**）——播放页顶栏据此显示「正在播的是哪个版本」。
           // 单版本条目为 null：那时片名后面不该多出一截。
           // ⚠️ 这个名字必须由 UI 传下去，不能让播放页自己重算：两边算出不同标签就会出现
@@ -506,7 +514,8 @@ data class EmbyDetailScreen(
                 server = currentServer,
                 listState = listState,
                 collapse = collapse,
-                showRecommendations = showRecommendations,
+                effectiveSourceId = playSourceId,
+                automaticVersionPolicy = policy,
                 // 剧照当封面区的整张背景图用，所以要按屏幕级别的宽度取（1080 足够铺满常见机型）：
                 // 之前取 128px 是为了「放大即虚化」的糊底效果，用户不喜欢 —— 现在直接看清晰大图。
                 // EmbyImageLoader 的 maxWidth 只做客户端降采样、不会改写 URL，
@@ -556,7 +565,6 @@ data class EmbyDetailScreen(
                     }
                   }
                 },
-                selectedMediaSourceId = selectedMediaSourceId,
                 onSelectMediaSource = { selectedMediaSourceId = it },
                 versionResumeSeconds = versionResumeSeconds,
                 onBack = { backStack.removeLastOrNull() },
@@ -672,8 +680,8 @@ private fun DetailBody(
    */
   listState: androidx.compose.foundation.lazy.LazyListState,
   collapse: HeaderCollapse,
-  /** 详情页推荐区开关。由 [EmbyDetailScreen] 读出后传进来。 */
-  showRecommendations: Boolean,
+  effectiveSourceId: String?,
+  automaticVersionPolicy: String,
   backdropUrl: String?,
   posterUrl: String?,
   /** resumeSeconds = 续播秒数（0 = 从头）。 */
@@ -706,8 +714,6 @@ private fun DetailBody(
   genreRecommendItems: List<EmbyItem>,
   /** 是否正在拉起播放器：播放键转圈 + 禁点（转给 [PlaySection]）。 */
   playLaunching: Boolean = false,
-  /** 多版本媒体：当前选中的版本 Id（null = 默认版本）。转给 [PlaySection] 画下拉框。 */
-  selectedMediaSourceId: String? = null,
   /** 多版本媒体：用户在下拉框里选了某个版本。 */
   onSelectMediaSource: (String) -> Unit = {},
   /**
@@ -739,17 +745,6 @@ private fun DetailBody(
 ) {
   val isFavorite = item.UserData?.IsFavorite == true
   val isPlayed = item.UserData?.Played == true
-  // 多版本媒体：真正生效的版本 Id（单版本媒体为 null）。下面「媒体信息」也要按它取源，
-  // 否则容器 / 文件大小 / 码率 / 音视频轨道会一直显示第一个版本，与选中的版本对不上。
-  // ⚠️ 必须与播放侧用**同一条规则**（autoSourcePreference 同一个值），
-  // 否则会出现「顶栏写着一个版本、媒体信息里写着另一个」。
-  val browserPrefsForSource = koinInject<BrowserPreferences>()
-  val effectiveSourceId =
-    effectiveEmbyMediaSourceId(
-      item,
-      selectedMediaSourceId,
-      MediaSourcePreference.fromKey(browserPrefsForSource.embyMediaSourcePreference.get()),
-    )
 
   // ── 折叠头部：高度**完全由列表滚动位置推导**，没有任何自定义手势 / 嵌套滚动 ──
   // 此前这里同时挂着两套纵向滚动的消费者（自定义 NestedScrollConnection + 下拉刷新），
@@ -782,7 +777,8 @@ private fun DetailBody(
           item = item,
           onPlay = onPlay,
           playLaunching = playLaunching,
-          selectedMediaSourceId = selectedMediaSourceId,
+          selectedMediaSourceId = effectiveSourceId,
+          automaticVersionPolicy = automaticVersionPolicy,
           onSelectMediaSource = onSelectMediaSource,
           versionResumeSeconds = versionResumeSeconds,
           onPlayFromStart = onPlayFromStart,
@@ -1021,35 +1017,26 @@ private fun DetailBody(
         }
       }
 
-      // ── 推荐：同一位演员 / 导演参与的其他影片 ──
-      // 放在演职员之后：看完了主演阵容，顺势往下推荐 TA 的片子，上下文是连着的。
-      // 设置里关掉「详情页推荐」后整块不渲染（连带省掉上面的网络请求）。
-      // ⚠️ 这里只是**把上层加载好的数据画出来**：数据与请求都在 [EmbyDetailScreen]
-      // 那一层（不随滚动被回收），所以滚出视口再滚回来不会重新请求。
-      if (showRecommendations) {
-        item {
-          RecommendationSection(
-            server = server,
-            recommendations = recommendItems,
-            onOpenItem = onRecommendClick,
-          )
-        }
-
-        // ── 同类型推荐：按本片某个类型（Genres）横向推荐 ──
-        // 与上面的「演员 / 导演」推荐互补：那边按人找，这边按题材找。
-        item {
-          GenreRecommendationSection(
-            server = server,
-            genre = genreRecommendLabel,
-            picks = genreRecommendItems,
-            onOpenItem = onRecommendClick,
-          )
-        }
+      // Fallback detail recommendations use data loaded by the owning screen, never by lazy rows.
+      item {
+        RecommendationSection(
+          server = server,
+          recommendations = recommendItems,
+          onOpenItem = onRecommendClick,
+        )
+      }
+      item {
+        GenreRecommendationSection(
+          server = server,
+          genre = genreRecommendLabel,
+          picks = genreRecommendItems,
+          onOpenItem = onRecommendClick,
+        )
       }
 
       // ── 媒体信息（含完整视频 / 音频编码信息）──
       item {
-        MediaInfoSection(item = item, selectedMediaSourceId = effectiveSourceId)
+        MediaInfoSection(item, effectiveSourceId, automaticVersionPolicy)
       }
     }
 
@@ -1346,8 +1333,9 @@ private fun PlaySection(
   /** 下载填充进度 0..1；null = 没有下载任务（不画填充） */
   /** 是否正在拉起播放器：播放键转圈 + 禁点。 */
   playLaunching: Boolean = false,
-  /** 多版本媒体：当前选中的版本 Id（null = 默认版本）。 */
+  /** Current effective version, already resolved with the shared automatic policy. */
   selectedMediaSourceId: String? = null,
+  automaticVersionPolicy: String = "high-resolution",
   /** 多版本媒体：用户切换了版本。 */
   onSelectMediaSource: (String) -> Unit = {},
   /**
@@ -1372,7 +1360,12 @@ private fun PlaySection(
   val serverPositionTicks = item.UserData?.PlaybackPositionTicks ?: 0L
   val positionTicks =
     versionResumeSeconds?.let { EmbyTicks.secondsToTicks(it) } ?: serverPositionTicks
-  val runTimeTicks = item.RunTimeTicks ?: 0L
+  val sources = item.MediaSources.orEmpty()
+  val source = sources.firstOrNull { !selectedMediaSourceId.isNullOrBlank() && it.Id == selectedMediaSourceId }
+    ?: sources.takeIf { it.isNotEmpty() }?.let {
+      it[LoembyMediaSelection.selectAutomaticSourceIndex(it, automaticVersionPolicy)]
+    }
+  val runTimeTicks = source?.RunTimeTicks ?: item.RunTimeTicks ?: 0L
   // 多版本媒体：MediaSources 就是各版本；只有一个（或 Id 缺失）时不算多版本。
   val mediaSources = item.MediaSources.orEmpty().filter { !it.Id.isNullOrBlank() }
   val resumeSeconds = EmbyTicks.ticksToSeconds(positionTicks)
@@ -1511,13 +1504,12 @@ private suspend fun loadVersionResumeSeconds(
   serverId: Long,
   item: EmbyItem,
   selectedMediaSourceId: String?,
-  /** 设置里的「多版本优先选择」规则；必须与播放侧同一个值，否则读错版本的进度 */
-  preference: MediaSourcePreference,
+  automaticVersionPolicy: String,
 ): Long? {
   if (serverId <= 0) return null
   val itemId = item.Id ?: return null
   val sourceId =
-    effectiveEmbyMediaSourceId(item, selectedMediaSourceId, preference) ?: return null
+    effectiveEmbyMediaSourceId(item, selectedMediaSourceId, automaticVersionPolicy) ?: return null
 
   repository.getVideoDataByTitle(EmbyVersionProgress.key(serverId, itemId, sourceId))?.let {
     return it.lastPosition.toLong()
@@ -1794,11 +1786,12 @@ private fun PlayButton(
 @Composable
 private fun MediaInfoSection(
   item: EmbyItem,
-  /** 当前选中的版本 Id；多版本媒体下「容器 / 文件大小 / 码率 / 音视频轨道」都跟着它走 */
-  selectedMediaSourceId: String? = null,
+  selectedMediaSourceId: String?,
+  automaticVersionPolicy: String,
 ) {
-  val entries =
-    remember(item, selectedMediaSourceId) { buildEmbyMediaInfoEntries(item, selectedMediaSourceId) }
+  val entries = remember(item, selectedMediaSourceId, automaticVersionPolicy) {
+    buildEmbyMediaInfoEntries(item, selectedMediaSourceId, automaticVersionPolicy)
+  }
 
   Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -2136,8 +2129,8 @@ private fun RecommendationSection(
  * 冷门片常常凑不出足够的同演员作品，但题材相同的片子通常管够。
  *
  * **用哪个类型**：一部片子常同时属于多个类型（剧情 / 惊悚 / 犯罪…）。固定取第一个
- * 的话，同一部片每次打开看到的推荐都一模一样。开关 `embyRandomGenreRecommend` 打开时
- * 每次进入把本片的类型**随机打乱**再取，于是每次打开题材都不同；关闭时退回「取第一个」。
+ * 的话，同一部片每次打开看到的推荐都一模一样。每次进入或刷新都会把本片的类型
+ * **随机打乱**再取，滚动期间保持不变。
  *
  * 随机容易挑到没几部同类的冷门类型，所以加载侧按打乱后的顺序**逐个尝试、取第一个查得到
  * 同类的**，避免「随机之后整块推荐消失」。全查不到（或服务端没刮削）才整块不显示。

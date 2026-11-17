@@ -42,6 +42,56 @@ class HiddenPlayerFeatureRemovalContractTest {
   }
 
   @Test
+  fun `fixed runtime policies remove remembered speed and optional eof loading branches`() {
+    val root = "app/marlboroadvance/mpvex/ui/player/"
+    val activity = source("${root}PlayerActivity.kt")
+    val viewModel = source("${root}PlayerViewModel.kt")
+    val controls = source("${root}controls/PlayerControls.kt")
+    val gestures = source("${root}controls/GestureHandler.kt")
+    val preferences = source("app/marlboroadvance/mpvex/preferences/PlayerPreferences.kt")
+    val native = source("${root}MPVView.kt")
+
+    listOf(activity, viewModel, controls, gestures, preferences).forEach { text ->
+      listOf(
+        "PlaybackMemory", "autoplayCountdown", "autoplayCancelled", "nextUpVisible", "showLoadingCircle",
+        "rememberGlobalSpeed", "rememberSpeedPerSeries", "rememberBrightness", "rememberSeriesBrightness",
+        "savePositionOnQuit", "allowGesturesInPanels", "autoCropBlackBars", "applyAutoCropPolicy",
+      ).forEach { assertFalse(it, text.contains(it)) }
+    }
+    assertFalse(activity.contains("state.playbackSpeed"))
+    assertFalse(activity.contains("savePlaybackStateJob"))
+    assertFalse(activity.contains("runBlocking"))
+    assertTrue(activity.contains("if (hasNext()) playNext()"))
+    assertTrue(viewModel.contains("playerPreferences.defaultSpeed.get()"))
+    assertTrue(gestures.contains("applyTemporaryPlaybackSpeed(speedItemGeneration"))
+    assertTrue(gestures.contains("if (panelShown != Panels.None)"))
+    assertTrue(gestures.contains("panelOpen = panelShown != Panels.None"))
+    assertTrue(controls.contains("resetControlsTimestamp, autoHideMillis"))
+    assertTrue(controls.contains("if (autoHideDelay != null"))
+    assertTrue(native.contains("configureCacheOption(\"cache-on-disk\", \"no\")"))
+    assertFalse(native.contains("configureCacheOption(\"cache-on-disk\", \"yes\")"))
+    assertTrue(native.contains("MPVLib.setOptionString(\"sub-auto\", \"no\")"))
+  }
+
+  @Test
+  fun `final local snapshot is enqueued before coordinator or native teardown`() {
+    val activity = source("app/marlboroadvance/mpvex/ui/player/PlayerActivity.kt")
+    val destroy = activity.substringAfter("override fun onDestroy()")
+      .substringBefore("private fun cleanupMPV()")
+    assertTrue(destroy.indexOf("saveVideoPlaybackState()") < destroy.indexOf("loemby.finish"))
+    assertFalse(destroy.contains(".join()"))
+    assertFalse(destroy.contains("job.cancel()"))
+    val switching = activity.substringAfter("private fun loadPlaylistItemInternal(index: Int)")
+      .substringBefore("private fun getFileNameFromUri")
+    assertTrue(switching.indexOf("saveVideoPlaybackState()") < switching.indexOf("playlistIndex = index"))
+    val save = activity.substringAfter("private fun captureVideoPlaybackState()")
+      .substringBefore("private suspend fun loadVideoPlaybackState")
+    assertTrue(save.contains("mediaTitle = identity.identifier"))
+    assertTrue(save.contains("versionProgressKey = identity.versionProgressKey"))
+    assertFalse(save.contains("lifecycleScope"))
+  }
+
+  @Test
   fun `danmaku state keeps automatic core with canonical rendering and no sheet state`() {
     val state = source(
       "app/marlboroadvance/mpvex/ui/player/danmaku/PlayerDanmakuState.kt",

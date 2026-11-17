@@ -10,13 +10,11 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
@@ -27,12 +25,9 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.RotateRight
@@ -40,8 +35,6 @@ import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.outlined.Image
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -62,7 +55,6 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -74,12 +66,9 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import app.marlboroadvance.mpvex.preferences.BrowserPreferences
-import app.marlboroadvance.mpvex.preferences.preference.collectAsState
 import app.marlboroadvance.mpvex.ui.browser.emby.photo.PhotoZoomRegistry
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import org.koin.compose.koinInject
 import kotlin.math.abs
 
 /**
@@ -122,10 +111,9 @@ class PhotoViewerChrome(
  * 照片旋转角：**按条目 key 记**，不是按页码。
  *
  * 为什么按 key：Emby 版会续页追加、来回翻页，按页码记会在队列变化时把角度错位到
- * 别的照片上；按 key（Emby 用条目 Id、网络用 path）就永远不会串。
+ * 别的照片上；按 Emby 条目 Id 记就永远不会串。
  *
- * 为什么放在外壳里：顶栏旋转钮、长按面板的「旋转 90 度」、「另存为 JPEG」的导出角度
- * 三处要读**同一份**状态。做成一个小 holder 由适配层创建、外壳持有，两边都能用。
+ * 顶栏旋转钮与长按面板共享同一份显示旋转状态，不修改图片字节。
  */
 @Stable
 class PhotoRotationState {
@@ -154,8 +142,7 @@ enum class PhotoLoadState { Loading, Ready, Failed }
  * 每页大图的加载状态登记处（幻灯片靠它决定**什么时候才开始倒数**）。
  *
  * ## 为什么需要
- * 幻灯片是「一张图停 N 秒」，从**页面进入**那一刻开始数。但网络版拉的是原图
- * （SMB / WebDAV 几十 MB 很常见），Emby 版遇到 HEIC 还要先失败再换 JPEG 兜底 ——
+ * 幻灯片的五秒间隔从图片就绪后开始。遇到 HEIC 时可能需要先失败再换 JPEG 兜底 ——
  * 图还在转圈，右下角已经数到 0 并翻页了，用户看到的就是「刚进来就被切走」。
  * 直白说：**倒计时的分母是「看图的时间」，不是「等图的时间」**。
  *
@@ -180,28 +167,10 @@ class PhotoLoadRegistry {
 }
 
 /**
- * 照片全屏浏览器的**共享外壳**：Emby 媒体库与网络位置共用这一份。
- *
- * 为什么合并（用户要求）：「那边改了这边没改」是这个项目最常踩的坑 ——
- * 两个浏览器原先各写一份翻页 / 沉浸 / 幻灯片 / 胶片条 / 下拉关闭，
- * 加了网络版的胶片条之后立刻出现「Emby 有、网络没有」的分叉。
- * 现在**外壳只有一份**，剩下的差异全是插槽：
- *  · [renderPage] —— 每页的照片怎么画（Emby 走服务端缩放 URL，网络走流式拉全图）；
- *  · [renderThumbnail] —— 胶片条里的缩略图怎么画；
- *  · [topBarActions] —— 计数 / 全屏 / 旋转之后再放什么（两个入口都放「更多菜单」）。
- *
- * 外壳自己负责（**改这里两个入口同时生效**）：
- * - 横向翻页（[HorizontalPager]）+ 沉浸模式（点画面切换、顶栏钮、返回键先退沉浸）；
- * - 下拉关闭（未放大时跟手位移 + 缩小 + 变暗，过阈值松手退出）；
- * - 幻灯片（间隔读「幻灯片间隔」设置、淡出→换页→淡入、倒计时圆环、播到最后自动停、
- *   播放期间 keepScreenOn、手动滑页只重置计时不停止播放、**当前这张加载完成前不倒数**）；
- * - 底部胶片条（开关两个入口共用 `photoFilmstrip`，当前页自动滚入可见）；
- * - 左下「上一张 / 下一张」、右下幻灯片钮、**底部信息栏**（文件名 + 大小日期 + 序号，
- *   两个入口都有 —— 以前只有网络版有，用户直接指出这是无谓的分叉）；
- * - **旋转**（顶栏钮 + [PhotoRotationState]，只影响显示，不改原字节）。
- *
- * ⚠️ 外壳**不碰数据**：队列怎么来、怎么续页、怎么保存，全在调用方（适配层）里。
- *    这正是两边能合并的原因 —— 共同的是交互，不同的是来源。
+ * Emby photo viewer shell for paging, zoom, display rotation and immersive controls.
+ * Slideshow starts paused and advances every five seconds only after manual activation.
+ * The current image must finish loading before its countdown begins.
+ * Queue loading and local viewing-position persistence remain with the caller.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -212,9 +181,7 @@ fun SharedPhotoViewer(
   pagerState: PagerState,
   /** 顶栏标题 */
   title: String,
-  /** 进页即播幻灯片（Emby 读设置项，网络版按「随机播放图片」入口传 true） */
-  autoPlaySlideshow: Boolean = false,
-  /** 旋转状态：调用方也持有同一个实例，长按面板 / 导出 JPEG 时要用同一份角度 */
+  /** 旋转状态：调用方与长按面板持有同一个显示角度。 */
   rotation: PhotoRotationState = rememberPhotoRotationState(),
   onBack: () -> Unit,
   /** 顶栏右侧额外按钮（如「更多菜单」），排在计数 / 全屏 / 旋转之后 */
@@ -234,24 +201,16 @@ fun SharedPhotoViewer(
     rotation: Int,
     onTap: () -> Unit,
   ) -> Unit,
-  /** 画胶片条里的某一格缩略图 */
-  renderThumbnail: @Composable (index: Int, modifier: Modifier) -> Unit,
 ) {
-  val browserPreferences = koinInject<BrowserPreferences>()
   val scope = rememberCoroutineScope()
   val currentPage = pagerState.currentPage
   // 下面的计时循环是「一个协程跑到底」（key 里不能带 currentPage），所以它闭包捕获的
-  // entries 会一直停留在启动那一刻 —— Emby 版续页追加、网络版换队列时就读到旧表。
+  // entries 会一直停留在启动那一刻，续页追加时就读到旧表。
   // 过一层 rememberUpdatedState：循环里永远读到最新的一版。
   val latestEntries by rememberUpdatedState(entries)
 
-  // 胶片条：**两个入口共用同一个偏好**（设置 → Emby 照片浏览与保存 → 照片浏览器）
-  val filmstrip by browserPreferences.photoFilmstrip.collectAsState()
-  val stripVisible = filmstrip && entries.size > 1
-
   // ── 幻灯片 ──
-  var slideshowPlaying by remember { mutableStateOf(autoPlaySlideshow) }
-  val interval by browserPreferences.photoSlideshowInterval.collectAsState()
+  var slideshowPlaying by remember { mutableStateOf(false) }
   // 本次还剩几秒（右下角按钮上的倒计时）。0 = 没在播 / 刚翻完页。
   var slideshowRemaining by remember { mutableIntStateOf(0) }
   // 转场用的整页透明度：翻页前淡到 0、换完页再淡回来。
@@ -284,24 +243,23 @@ fun SharedPhotoViewer(
   // 改成「一个协程跑到底」：循环里自己 delay 到点、自己翻页。
   // 「手动滑页重置计时」在循环内部判（只有**用户**在滑才重置，幻灯片自己翻的不算）：
   // 滑一下只是「这张要多看一会儿」，不停止播放。
-  LaunchedEffect(slideshowPlaying, interval) {
+  LaunchedEffect(slideshowPlaying) {
     if (!slideshowPlaying) {
       slideshowRemaining = 0
       // 中途关掉播放时把透明度收回 1，别让画面卡在半透明
       slideshowAlpha.snapTo(1f)
       return@LaunchedEffect
     }
-    val totalMs = interval.seconds * 1000L
+    val totalMs = SLIDESHOW_INTERVAL_SECONDS * 1000L
     // 幻灯片自己翻页期间 isScrollInProgress 也是 true，用这个标志把它与用户手势区分开
     var autoScrolling = false
     while (true) {
       var elapsed = 0L
-      slideshowRemaining = interval.seconds
+      slideshowRemaining = SLIDESHOW_INTERVAL_SECONDS
       while (elapsed < totalMs) {
         delay(TICK_MS)
         // ⭐ 当前这张还没就绪 ⇒ 计时归零、停在满格（不倒计时、不翻页）。
-        //    网络版拉的是原图（SMB 上几十 MB 很常见），Emby 版遇到 HEIC 还要先失败
-        //    再换 JPEG 兜底 —— 图还在转圈就数到 0 并翻页，等于这张根本没看过。
+        //    HEIC 可能需要失败后换 JPEG 兜底；加载期间翻页会让这张图根本没被看过。
         //    与「用户正在滑页」共用同一条归零分支：手动滑到一张没加载完的，同样继续等。
         //    Failed 不算「等」：坏图解不出来，等下去只会卡死在这里。
         val page = pagerState.currentPage
@@ -310,7 +268,7 @@ fun SharedPhotoViewer(
         if (!autoScrolling && (pagerState.isScrollInProgress || !ready)) {
           // 用户在自己滑 / 图还没出来：这张重新开始计时（不停止播放）
           elapsed = 0
-          slideshowRemaining = interval.seconds
+          slideshowRemaining = SLIDESHOW_INTERVAL_SECONDS
         } else {
           elapsed += TICK_MS
           // 向上取整，让「还剩 1 秒」真的显示 1 而不是 0
@@ -333,8 +291,8 @@ fun SharedPhotoViewer(
     }
   }
 
-  // 信息栏两个入口都有（不再按入口分叉），只剩胶片条会影响按钮抬高多少
-  val controlsBottom = photoControlsBottom(filmstrip = stripVisible)
+  // Keep controls above the photo metadata bar.
+  val controlsBottom = 84.dp
   val canNavigate = entries.size > 1
 
   Box(
@@ -442,7 +400,7 @@ fun SharedPhotoViewer(
           )
           if (entries.isNotEmpty()) {
             // ⚠️ 顶栏**不再放「3 / 120」计数器**：信息栏右下角已经有同一个序号，
-            //    重复一遍只会把标题挤到只剩几个字（网络版顶栏 3 个钮 + 返回已经占满 192dp）。
+            //    重复一遍只会把标题挤到只剩几个字（顶栏多个动作已经占用不少空间）。
             //    信息栏跟着沉浸态一起隐藏，所以「没计数器」不会出现死角。
             // ── 全屏（沉浸）──
             // 与「点画面任意处」是同一个开关，这里只是给一个明确的入口。
@@ -457,7 +415,7 @@ fun SharedPhotoViewer(
             }
             // ── 旋转 90°（顺时针）──
             // 角度按条目 key 记（[PhotoRotationState]），翻页回来还在；
-            // 只影响显示与「另存为 JPEG」，「保存原图」永远是原字节。
+            // 只影响显示，不修改图片字节。
             val rotateKey = entries.getOrNull(currentPage)?.key
             if (rotateKey != null) {
               IconButton(onClick = { rotation.rotate(rotateKey) }) {
@@ -521,35 +479,19 @@ fun SharedPhotoViewer(
         SlideshowButton(
           playing = slideshowPlaying,
           remainingSeconds = slideshowRemaining,
-          totalSeconds = interval.seconds,
+          totalSeconds = SLIDESHOW_INTERVAL_SECONDS,
           bottomPadding = controlsBottom,
           onClick = { slideshowPlaying = !slideshowPlaying },
         )
       }
 
-      // ── 底部（自下而上）：胶片条（可选）+ 信息栏 ──
-      // 两者都贴底边，所以堆进同一个 Column —— 不用手算信息栏多高，
-      // 也不会因为字号 / 语言一换就错位。
+      // Photo metadata stays visible outside immersive mode.
       Column(
         modifier = Modifier
           .align(Alignment.BottomCenter)
           .fillMaxWidth(),
       ) {
-        AnimatedVisibility(
-          visible = !immersive && stripVisible,
-          enter = fadeIn(),
-          exit = fadeOut(),
-        ) {
-          PhotoFilmstrip(
-            entries = entries,
-            currentPage = currentPage,
-            renderThumbnail = renderThumbnail,
-            onPageClick = { index -> scope.launch { pagerState.animateScrollToPage(index) } },
-          )
-        }
-        // ⚠️ 信息栏**两个入口都显示**（不再有 showInfoBar 开关）：
-        //    以前只有网络版有、Emby 版没有，用户直接把这当成「无谓的分叉」。
-        //    数据来自 entries 的 title/meta，与数据源无关。
+        // Metadata comes from the current entry, independent of image loading.
         AnimatedVisibility(
           visible = !immersive,
           enter = fadeIn(),
@@ -567,20 +509,9 @@ fun SharedPhotoViewer(
 }
 
 /**
- * 底部悬浮控件（翻页 / 幻灯片）距底的高度。
- *
- * 这几个数是把两个入口**现有的观感**原样固定下来的结果，别再各自手算：
- *  · 信息栏（两个入口都有）：两行文字 ≈ 84dp；
- *  · 胶片条再吃掉 64dp（56dp 高 + 8dp 间距）。
- * ⚠️ 有胶片条时按钮**不能**压在缩略图上，宁可多留一点。
- */
-private fun photoControlsBottom(filmstrip: Boolean): Dp = if (filmstrip) 148.dp else 84.dp
-
-/**
  * 文件大小的人类可读写法（`719 KB` / `1.2 MB`）。
  *
- * 放在外壳里共用：信息栏的 meta 行两个入口都要拼「大小 · 日期」，
- * 各写一份必然出现「Emby 显示 1.2 MB、网络显示 1.20 MB」这种无谓差异。
+ * 信息栏与图片信息面板共用格式，保证同一张图片的大小显示一致。
  */
 fun formatPhotoFileSize(bytes: Long): String = when {
   bytes < 1024 -> "$bytes B"
@@ -640,95 +571,6 @@ private fun PhotoInfoBar(
         maxLines = 1,
       )
     }
-  }
-}
-
-/**
- * 底部缩略图胶片条：横向一排小图，点一下跳到那张。
- *
- * 当前那张用**白框 + 满不透明度**标出来，其余降到 55% —— 不靠颜色，
- * 全屏浏览器底色是纯黑，主题色在这里会糊。
- *
- * 当前页变化时自动把它滚进可见区（`animateScrollToItem`），否则翻到第 50 张时
- * 高亮早已滚出屏幕，这条就失去意义了。
- */
-@Composable
-private fun PhotoFilmstrip(
-  entries: List<PhotoViewerEntry>,
-  currentPage: Int,
-  renderThumbnail: @Composable (index: Int, modifier: Modifier) -> Unit,
-  onPageClick: (Int) -> Unit,
-) {
-  val listState = rememberLazyListState()
-  LaunchedEffect(currentPage) {
-    if (currentPage in entries.indices) {
-      // 越界 / 布局未完成时 animateScrollToItem 会抛，包一层免得整页崩
-      runCatching { listState.animateScrollToItem(currentPage) }
-    }
-  }
-  LazyRow(
-    state = listState,
-    modifier = Modifier
-      .fillMaxWidth()
-      .padding(bottom = 8.dp)
-      .height(56.dp)
-      .background(Color.Black.copy(alpha = 0.55f)),
-    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-    horizontalArrangement = Arrangement.spacedBy(6.dp),
-  ) {
-    items(count = entries.size, key = { index -> entries[index].key }) { index ->
-      val selected = index == currentPage
-      Box(
-        modifier = Modifier
-          .size(44.dp)
-          .clip(RoundedCornerShape(6.dp))
-          .alpha(if (selected) 1f else 0.55f)
-          .border(
-            width = if (selected) 2.dp else 0.dp,
-            color = if (selected) Color.White else Color.Transparent,
-            shape = RoundedCornerShape(6.dp),
-          )
-          .clickable { onPageClick(index) },
-      ) {
-        // ⭐ 占位底**垫在缩略图下面**，不是「失败时才画」。
-        //    原因：这一格的底色是全页纯黑 + 胶片条 55% 黑，而缩略图在**加载中**
-        //    是「什么都不画」（`NetworkApiThumbnail(showShimmer = false)`、
-        //    `NetworkPhotoThumbnail` 的 shownBefore 分支都是这个行为）、
-        //    加载失败时也只有一个 35% 透明度的破图图标，还要再乘上 55% 的未选中
-        //    alpha ⇒ 实际约 19% 灰，等于看不见。真机上就是「一排纯黑的格子」。
-        //    垫一层浅色 + 图片图标以后，加载中 / 没有封面图 / 加载失败三种情况
-        //    都看得出「这里是一张照片」，图片本身（Crop 铺满、不透明）会把它
-        //    完全盖住，正常显示时看不出这一层的存在。
-        PhotoThumbPlaceholder()
-        renderThumbnail(index, Modifier.fillMaxSize())
-      }
-    }
-  }
-}
-
-/**
- * 胶片条格子里的**默认占位图**：浅灰底 + 一个小图片图标。
- *
- * 为什么要它见 [PhotoFilmstrip] 里那段注释（一句话：缩略图的加载态是「什么都不画」，
- * 而这一格的底色是纯黑 ⇒ 没图就是一排黑洞）。
- *
- * 视觉口径与全屏浏览器一致：**只用黑白灰，不用主题色** —— 胶片条永远压在纯黑底上，
- * 主题色（尤其浅色主题下的深色 onSurfaceVariant）在这里会直接糊成看不见。
- */
-@Composable
-private fun PhotoThumbPlaceholder() {
-  Box(
-    modifier = Modifier
-      .fillMaxSize()
-      .background(Color.White.copy(alpha = 0.14f)),
-    contentAlignment = Alignment.Center,
-  ) {
-    Icon(
-      imageVector = Icons.Outlined.Image,
-      contentDescription = null,
-      tint = Color.White.copy(alpha = 0.55f),
-      modifier = Modifier.size(16.dp),
-    )
   }
 }
 
@@ -830,5 +672,8 @@ private fun PhotoNavButton(
 private const val DISMISS_THRESHOLD_DP = 120f
 
 /** 幻灯片计时 tick（ms）与淡入淡出时长（ms） */
+/** Manual slideshow uses a fixed five-second viewing interval. */
+private const val SLIDESHOW_INTERVAL_SECONDS = 5
+
 private const val TICK_MS = 250L
 private const val FADE_MS = 220

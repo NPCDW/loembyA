@@ -2,111 +2,55 @@ package app.marlboroadvance.mpvex.ui.preferences
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
-import androidx.compose.material.icons.outlined.AutoAwesomeMotion
 import androidx.compose.material.icons.outlined.Audiotrack
-// ⚠️ material icons 的 `Icons.Outlined.X` 是**顶层扩展属性**，不是成员 ——
-// 每个用到的图标都必须单独 `import androidx.compose.material.icons.outlined.X`，
-// 漏了就是「Unresolved reference 'X'」（图标在库里明明存在）。
-import androidx.compose.material.icons.outlined.Casino
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.Code
-import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Gesture
-import androidx.compose.material.icons.outlined.Grid3x3
 import androidx.compose.material.icons.outlined.Info
-import androidx.compose.material.icons.outlined.Layers
-import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material.icons.outlined.Palette
-import androidx.compose.material.icons.outlined.PhotoLibrary
 import androidx.compose.material.icons.outlined.PlayCircle
 import androidx.compose.material.icons.outlined.Search
-import androidx.compose.material.icons.outlined.Shuffle
 import androidx.compose.material.icons.outlined.Subtitles
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material.icons.outlined.Autorenew
-import androidx.compose.material.icons.outlined.Block
-import androidx.compose.material.icons.outlined.Dashboard
-import androidx.compose.material.icons.outlined.DateRange
-import androidx.compose.material.icons.outlined.Label
-import androidx.compose.material.icons.outlined.Link
-import androidx.compose.material.icons.outlined.RoundedCorner
-import androidx.compose.material.icons.outlined.Schedule
-import androidx.compose.material.icons.outlined.Slideshow
-import androidx.compose.material.icons.outlined.ThumbUp
-import androidx.compose.material.icons.outlined.Tune
-import androidx.compose.material.icons.outlined.ViewComfy
-import androidx.compose.material.icons.outlined.Widgets
-import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import app.marlboroadvance.mpvex.ui.browser.LocalNavigationBarHeight
 import app.marlboroadvance.mpvex.R
-import app.marlboroadvance.mpvex.domain.emby.MediaSourcePreference
-import app.marlboroadvance.mpvex.preferences.AppLockMethod
-import app.marlboroadvance.mpvex.preferences.AppLockPreferences
-import app.marlboroadvance.mpvex.preferences.BrowserPreferences
 import app.marlboroadvance.mpvex.preferences.DanmakuPreferences
-import app.marlboroadvance.mpvex.preferences.FolderCoverRefreshPolicy
-import app.marlboroadvance.mpvex.preferences.PhotoSlideshowInterval
 import app.marlboroadvance.mpvex.preferences.preference.collectAsState
 import app.marlboroadvance.mpvex.presentation.Screen
-import app.marlboroadvance.mpvex.ui.browser.emby.discover.SimilarAlgorithm
-import app.marlboroadvance.mpvex.ui.browser.emby.components.EmbyGachaStyle
-import app.marlboroadvance.mpvex.ui.lock.AppLockManageDialog
-import app.marlboroadvance.mpvex.ui.lock.PatternChangeDialog
-import app.marlboroadvance.mpvex.ui.lock.PatternSetupDialog
-import app.marlboroadvance.mpvex.ui.lock.PatternVerifyDialog
-import app.marlboroadvance.mpvex.ui.lock.PinChangeDialog
-import app.marlboroadvance.mpvex.ui.lock.PinSetupDialog
-import app.marlboroadvance.mpvex.ui.lock.PinVerifyDialog
-import app.marlboroadvance.mpvex.ui.lock.UnlockMethodDialog
+import app.marlboroadvance.mpvex.ui.browser.LocalNavigationBarHeight
 import app.marlboroadvance.mpvex.ui.postgres.PostgresPreferencesScreen
 import app.marlboroadvance.mpvex.ui.utils.LocalBackStack
 import kotlinx.serialization.Serializable
-import me.zhanghai.compose.preference.ListPreference
 import me.zhanghai.compose.preference.Preference
 import me.zhanghai.compose.preference.ProvidePreferenceLocals
-import me.zhanghai.compose.preference.SliderPreference
-import me.zhanghai.compose.preference.SwitchPreference
 import org.koin.compose.koinInject
-import kotlin.math.roundToInt
 
 @Composable
 internal fun PreferencesContent(modifier: Modifier = Modifier, showBack: Boolean = true) {
@@ -127,7 +71,7 @@ object PreferencesScreen : Screen {
       modifier = modifier,
       topBar = {
         TopAppBar(
-          title = { 
+          title = {
             Text(
               text = stringResource(R.string.pref_preferences),
               style = MaterialTheme.typography.headlineSmall,
@@ -138,7 +82,7 @@ object PreferencesScreen : Screen {
           navigationIcon = {
             if (showBack) IconButton(onClick = backstack::removeLastOrNull) {
               Icon(
-                Icons.AutoMirrored.Outlined.ArrowBack, 
+                Icons.AutoMirrored.Outlined.ArrowBack,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.secondary,
               )
@@ -158,7 +102,6 @@ object PreferencesScreen : Screen {
               .fillMaxSize()
               .padding(padding),
         ) {
-          // Search bar - full width, prominent placement
           item {
             Surface(
               modifier = Modifier
@@ -189,7 +132,7 @@ object PreferencesScreen : Screen {
               }
             }
           }
-          
+
           item {
             PreferenceCard {
               Preference(
@@ -234,98 +177,97 @@ object PreferencesScreen : Screen {
             }
           }
 
-          // UI & Appearance Section
           item {
             PreferenceSectionHeader(title = "外观")
           }
-          
+
           item {
             PreferenceCard {
               Preference(
                 modifier = Modifier.settingsAnchor(R.string.pref_appearance_title),
-                title = { Text(text = stringResource(id = R.string.pref_appearance_title), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                summary = { 
-                  Text(
-                    text = stringResource(id = R.string.pref_appearance_summary),
-                    color = MaterialTheme.colorScheme.outline
-                  ) 
+                title = {
+                  Text(stringResource(R.string.pref_appearance_title), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 },
-                icon = { 
+                summary = {
+                  Text(
+                    text = stringResource(R.string.pref_appearance_summary),
+                    color = MaterialTheme.colorScheme.outline,
+                  )
+                },
+                icon = {
                   Icon(
-                    Icons.Outlined.Palette, 
+                    Icons.Outlined.Palette,
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary
-                  ) 
+                    tint = MaterialTheme.colorScheme.primary,
+                  )
                 },
                 onClick = { backstack.add(AppearancePreferencesScreen) },
               )
-
             }
           }
-          
-          // Playback & Controls Section
+
           item {
             PreferenceSectionHeader(title = "播放与控件")
           }
-          
+
           item {
             PreferenceCard {
               Preference(
-
                 modifier = Modifier.settingsAnchor(R.string.pref_player),
-                title = { Text(text = stringResource(id = R.string.pref_player), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                summary = { 
-                  Text(
-                    text = stringResource(id = R.string.pref_player_summary),
-                    color = MaterialTheme.colorScheme.outline
-                  ) 
+                title = {
+                  Text(stringResource(R.string.pref_player), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 },
-                icon = { 
+                summary = {
+                  Text(
+                    text = stringResource(R.string.pref_player_summary),
+                    color = MaterialTheme.colorScheme.outline,
+                  )
+                },
+                icon = {
                   Icon(
-                    Icons.Outlined.PlayCircle, 
+                    Icons.Outlined.PlayCircle,
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary
-                  ) 
+                    tint = MaterialTheme.colorScheme.primary,
+                  )
                 },
                 onClick = { backstack.add(PlayerPreferencesScreen) },
               )
 
               PreferenceDivider()
-              
-              Preference(
 
+              Preference(
                 modifier = Modifier.settingsAnchor(R.string.pref_gesture),
-                title = { Text(text = stringResource(id = R.string.pref_gesture), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                summary = { 
-                  Text(
-                    text = stringResource(id = R.string.pref_gesture_summary),
-                    color = MaterialTheme.colorScheme.outline
-                  ) 
+                title = {
+                  Text(stringResource(R.string.pref_gesture), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 },
-                icon = { 
+                summary = {
+                  Text(
+                    text = stringResource(R.string.pref_gesture_summary),
+                    color = MaterialTheme.colorScheme.outline,
+                  )
+                },
+                icon = {
                   Icon(
-                    Icons.Outlined.Gesture, 
+                    Icons.Outlined.Gesture,
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary
-                  ) 
+                    tint = MaterialTheme.colorScheme.primary,
+                  )
                 },
                 onClick = { backstack.add(GesturePreferencesScreen) },
               )
 
               PreferenceDivider()
 
-              // 弹幕独立设置页（开关 / 弹幕源 / 凭证 / 自动匹配）。
-              // ⚠️ 原来这个入口挂在外观定制页里，但弹幕跟外观无关，所以单独拆了一页。
-              //    它默认是关的，所以摘要里直接带开关状态：不显示状态的话，
-              //    用户永远不知道有这东西、更不知道去哪开。
               val danmakuPrefs = koinInject<DanmakuPreferences>()
               val danmakuEnabled by danmakuPrefs.enabled.collectAsState()
               Preference(
                 modifier = Modifier.settingsAnchor(R.string.danmaku_title),
-                title = { Text(text = stringResource(id = R.string.danmaku_title), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                title = {
+                  Text(stringResource(R.string.danmaku_title), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                },
                 summary = {
                   Text(
-                    text = stringResource(id = R.string.danmaku_settings_summary) +
+                    text = stringResource(R.string.danmaku_settings_summary) +
                       if (danmakuEnabled) "（已开启）" else "（未开启）",
                     color = MaterialTheme.colorScheme.outline,
                   )
@@ -339,97 +281,26 @@ object PreferencesScreen : Screen {
                 },
                 onClick = { backstack.add(DanmakuSettingsScreen) },
               )
-
-              PreferenceDivider()
-
             }
           }
-          
-          // Media Settings Section
+
           item {
             PreferenceSectionHeader(title = "媒体渲染（解码 / 字幕 / 音频）")
           }
-          
+
           item {
             PreferenceCard {
               Preference(
-
                 modifier = Modifier.settingsAnchor(R.string.pref_decoder),
-                title = { Text(text = stringResource(id = R.string.pref_decoder), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                summary = { 
+                title = {
+                  Text(stringResource(R.string.pref_decoder), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                },
+                summary = {
                   Text(
-                    text = stringResource(id = R.string.pref_decoder_summary),
-                    color = MaterialTheme.colorScheme.outline
-                  ) 
+                    text = stringResource(R.string.pref_decoder_summary),
+                    color = MaterialTheme.colorScheme.outline,
+                  )
                 },
-                icon = { 
-                  Icon(
-                    Icons.Outlined.Memory, 
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary
-                  ) 
-                },
-                onClick = { backstack.add(DecoderPreferencesScreen) },
-              )
-              
-              PreferenceDivider()
-              
-              Preference(
-
-                modifier = Modifier.settingsAnchor(R.string.pref_subtitles),
-                title = { Text(text = stringResource(id = R.string.pref_subtitles), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                summary = { 
-                  Text(
-                    text = stringResource(id = R.string.pref_subtitles_summary),
-                    color = MaterialTheme.colorScheme.outline
-                  ) 
-                },
-                icon = { 
-                  Icon(
-                    Icons.Outlined.Subtitles, 
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary
-                  ) 
-                },
-                onClick = { backstack.add(SubtitlesPreferencesScreen) },
-              )
-              
-              PreferenceDivider()
-              
-              Preference(
-
-                modifier = Modifier.settingsAnchor(R.string.pref_audio),
-                title = { Text(text = stringResource(id = R.string.pref_audio), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                summary = { 
-                  Text(
-                    text = stringResource(id = R.string.pref_audio_summary),
-                    color = MaterialTheme.colorScheme.outline
-                  ) 
-                },
-                icon = { 
-                  Icon(
-                    Icons.Outlined.Audiotrack, 
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary
-                  ) 
-                },
-                onClick = { backstack.add(AudioPreferencesScreen) },
-              )
-            }
-          }
-          
-          // ── Emby 媒体库与元数据 ────────────────────────────────────
-          item {
-            PreferenceSectionHeader(title = "Emby 媒体库与元数据")
-          }
-
-          item {
-            PreferenceCard {
-              // 预测性懒加载（所有分页列表通用）：开 = 距末尾约一屏就提前拉下一页，
-              // 快速fling 也来得及；关 = 贴近末尾才拉（老行为，最省请求）。
-              val browserPreferences = koinInject<BrowserPreferences>()
-              val predictivePreload by browserPreferences.embyPredictivePreload.collectAsState()
-              SwitchPreference(
                 icon = {
                   Icon(
                     Icons.Outlined.Memory,
@@ -437,949 +308,54 @@ object PreferencesScreen : Screen {
                     tint = MaterialTheme.colorScheme.primary,
                   )
                 },
-                value = predictivePreload,
-                onValueChange = { browserPreferences.embyPredictivePreload.set(it) },
-                modifier = Modifier.settingsAnchor("预测性懒加载"),
-                title = { Text(text = "预测性懒加载", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                summary = {
-                  Text(
-                    text = "滑到距列表末尾约一屏时就提前加载下一页；关闭后贴近末尾才加载",
-                    color = MaterialTheme.colorScheme.outline,
-                  )
-                },
-              )
-            }
-          }
-
-          // ── Emby 推荐与首页 ────────────────────────────────────────
-          item {
-            PreferenceSectionHeader(title = "Emby 推荐与首页")
-          }
-
-          item {
-            val browserPreferences = koinInject<BrowserPreferences>()
-            val showRecommendations by browserPreferences.embyShowRecommendations.collectAsState()
-            val randomGenreRecommend by browserPreferences.embyRandomGenreRecommend.collectAsState()
-            val homeShowMix by browserPreferences.embyHomeShowMix.collectAsState()
-            val mixColumns by browserPreferences.embyMixGridColumns.collectAsState()
-            PreferenceCard {
-              // 详情页推荐总开关：关闭后「推荐」与「同类型推荐」在详情页整块不显示
-              SwitchPreference(
-                icon = {
-                  Icon(
-                    Icons.Outlined.ThumbUp,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                  )
-                },
-                value = showRecommendations,
-                onValueChange = { browserPreferences.embyShowRecommendations.set(it) },
-                modifier = Modifier.settingsAnchor("详情页推荐"),
-                title = { Text(text = "详情页推荐", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                summary = {
-                  Text(
-                    text = "详情页显示「推荐」与「同类型推荐」；关闭后详情页不再展示推荐内容",
-                    color = MaterialTheme.colorScheme.outline,
-                  )
-                },
+                onClick = { backstack.add(DecoderPreferencesScreen) },
               )
 
               PreferenceDivider()
 
-              // 详情页「同类型」随机选取类型：一部片常属多个类型，随机后每次打开题材不同
-              SwitchPreference(
-                icon = {
-                  Icon(
-                    Icons.Outlined.Shuffle,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                  )
-                },
-                value = randomGenreRecommend,
-                onValueChange = { browserPreferences.embyRandomGenreRecommend.set(it) },
-                modifier = Modifier.settingsAnchor("同类型推荐随机选取类型"),
-                title = { Text(text = "同类型推荐随机选取类型", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                summary = {
-                  Text(
-                    text = "详情页「同类型」每次从本片所属的多个类型里随机挑一个；关闭则固定用第一个类型",
-                    color = MaterialTheme.colorScheme.outline,
-                  )
-                },
-              )
-
-              PreferenceDivider()
-
-              // 「猜你喜欢 / 即混」的算法选择（清单 #14）。
-              // 用两个 FilterChip 而不是 ListPreference：只有两个选项，
-              // 横向两个 chip 一眼就能看完，点错了立刻能看出来；
-              // ListPreference 要点开弹窗才知道当前选的是哪个。
-              val similarAlgorithm by browserPreferences.embySimilarAlgorithm.collectAsState()
-              val excludePlayed by browserPreferences.embySimilarExcludePlayed.collectAsState()
-              Column(
-                modifier = Modifier
-                  .fillMaxWidth()
-                  .padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-              ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                  Icon(
-                    Icons.Outlined.AutoAwesome,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(24.dp),
-                  )
-                  Spacer(Modifier.width(12.dp))
-                  Text(text = "推荐算法", style = MaterialTheme.typography.bodyLarge)
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                  SimilarAlgorithm.entries.forEach { option ->
-                    FilterChip(
-                      selected = similarAlgorithm == option,
-                      onClick = { browserPreferences.embySimilarAlgorithm.set(option) },
-                      label = {
-                        Text(
-                          when (option) {
-                            SimilarAlgorithm.EMBY -> "服务端"
-                            SimilarAlgorithm.LOCAL -> "本地"
-                          },
-                        )
-                      },
-                    )
-                  }
-                }
-                Text(
-                  text = when (similarAlgorithm) {
-                    SimilarAlgorithm.EMBY ->
-                      "调用 Emby 自带的推荐算法，结果更准；但需要服务端支持且元数据已刮削，" +
-                        "否则该服务器可能返回空"
-                    SimilarAlgorithm.LOCAL ->
-                      "由本机按类型 / 年代 / 评分 / 阵容打分排序；不依赖服务端，"+
-                        "库里还有别的内容就一定有结果"
-                  },
-                  style = MaterialTheme.typography.bodySmall,
-                  color = MaterialTheme.colorScheme.outline,
-                )
-              }
-
-              PreferenceDivider()
-
-              SwitchPreference(
-                icon = {
-                  Icon(
-                    Icons.Outlined.Block,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                  )
-                },
-                value = excludePlayed,
-                onValueChange = { browserPreferences.embySimilarExcludePlayed.set(it) },
-                modifier = Modifier.settingsAnchor("推荐时排除已看过"),
-                title = { Text(text = "推荐时排除已看过", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                summary = {
-                  Text(
-                    text = "关闭后看过的片子也会出现在推荐与连播列表里（适合重刷老片）",
-                    color = MaterialTheme.colorScheme.outline,
-                  )
-                },
-              )
-
-              PreferenceDivider()
-
-              // 首页「随便看看」（即混的一批）总开关。
-              // 关掉后首页不再发那一次推荐请求，也不占首页一整行的位置。
-              SwitchPreference(
-                icon = {
-                  Icon(
-                    Icons.Outlined.Dashboard,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                  )
-                },
-                value = homeShowMix,
-                onValueChange = { browserPreferences.embyHomeShowMix.set(it) },
-                modifier = Modifier.settingsAnchor("首页「随便看看」"),
-                title = { Text(text = "首页「随便看看」", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                summary = {
-                  Text(
-                    text = "在首页「最新加入」下面显示一批可连播的推荐；关闭后首页不再请求这批内容",
-                    color = MaterialTheme.colorScheme.outline,
-                  )
-                },
-              )
-
-              PreferenceDivider()
-
-              // 即混网格的列数单独给一项，不复用媒体库的列数。
-              // 两者默认值一样，但改动的动机不同：媒体库列数是「屏幕宽窄」问题，
-              // 即混列数是「一批推荐想看几列」问题。共用一个键会导致想调一边时另一边跟着变。
-              SliderPreference(
-                icon = {
-                  Icon(
-                    Icons.Outlined.Grid3x3,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                  )
-                },
-                value = mixColumns.toFloat(),
-                onValueChange = { browserPreferences.embyMixGridColumns.set(it.roundToInt()) },
-                sliderValue = mixColumns.toFloat(),
-                onSliderValueChange = { browserPreferences.embyMixGridColumns.set(it.roundToInt()) },
-                // 标题与说明里用的一律是**界面上真实出现的字**。
-                // 「连播列表」是「猜你喜欢」页里那个区块的标题（见EmbyDiscoverScreen），
-                // 别写成「即混」—— 那是 Emby 的 InstantMix 接口名，
-                // 玩家在界面上搜不到这个词，只会觉得说的是别的地方。
-                modifier = Modifier.settingsAnchor("连播列表每行数量"),
-                title = { Text(text = "连播列表每行数量", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                valueRange = 2f..6f,
-                valueSteps = 3,
-                summary = {
-                  Text(
-                    text = "「猜你喜欢」页里「连播列表」那一块，一行放几张海报，当前 $mixColumns 个。" +
-                      "数字越小海报越大，封面上的字看得更清；不影响媒体库的每行个数。",
-                    color = MaterialTheme.colorScheme.outline,
-                  )
-                },
-              )
-            }
-          }
-
-          // ── Emby 播放 ────────────────────────────────────
-          item {
-            PreferenceSectionHeader(title = "Emby 播放")
-          }
-
-          item {
-            val browserPreferences = koinInject<BrowserPreferences>()
-            val resolveDirectLink by browserPreferences.embyResolveDirectLink.collectAsState()
-            PreferenceCard {
-              // ── 以下两项原在「Emby 服务器维护」页，现移到这里 ──────────
-              // 移过来的理由：这两项**与具体哪台服务器无关**，是全局播放偏好。
-              // 放在维护页里自相矛盾 —— 那页是加删服务器 / 查连接状态的地方，
-              // 用户要在那里找一个「跟哪台服务器都无关」的开关。
-              // 放在本分区是因为存根同源：都是 BrowserPreferences 里的 Emby 偏好。
-              // ⚠️ 偏好键**不能改**，改了等于重置所有用户已有的选择。
-              SwitchPreference(
-                icon = {
-                  Icon(
-                    Icons.Outlined.Link,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                  )
-                },
-                value = resolveDirectLink,
-                onValueChange = { browserPreferences.embyResolveDirectLink.set(it) },
-                modifier = Modifier.settingsAnchor("预解析直链（302）"),
-                title = { Text(text = "预解析直链（302）", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                summary = {
-                  Text(
-                    text = "播放前先取出跳转后的真实地址。用于网盘 / STRM 这类带 302 跳转、" +
-                      "直链有有效期的源；解析失败会自动回退，不影响正常播放。",
-                    color = MaterialTheme.colorScheme.outline,
-                  )
-                },
-              )
-
-              PreferenceDivider()
-
-              // ── 多版本优先选择 ────────────────────────────────────────
-              // 同一影片有多个版本（4K/1080P/不同码率）时，播放前自动按这条规则挑，
-              // 省掉每次都去点版本下拉框。
-              // 优先级是「用户手动选 > 本规则」：在详情页下拉里选过的版本永远优先，
-              //   规则只在没选过时接管。
-              // ⚠️ 用 DropDown 而非单选按钮组：条目有 7 个，单选组会把这个分区撑得很长。
-              val sourcePrefKey by browserPreferences.embyMediaSourcePreference.collectAsState()
-              val sourcePref = MediaSourcePreference.fromKey(sourcePrefKey)
-              ListPreference(
-                icon = {
-                  Icon(
-                    Icons.Outlined.Tune,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                  )
-                },
-                value = sourcePref,
-                onValueChange = { browserPreferences.embyMediaSourcePreference.set(it.key) },
-                values = MediaSourcePreference.entries,
-                valueToText = { AnnotatedString(mediaSourcePreferenceLabel(it)) },
-                modifier = Modifier.settingsAnchor(R.string.pref_media_source_pref_title),
-                title = { Text(text = stringResource(R.string.pref_media_source_pref_title), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                summary = {
-                  Text(
-                    text = mediaSourcePreferenceLabel(sourcePref),
-                    color = MaterialTheme.colorScheme.outline,
-                  )
-                },
-              )
-            }
-          }
-
-          // ── Emby 照片浏览 ────────────────────────────────────
-          item {
-            PreferenceSectionHeader(title = "Emby 照片浏览")
-          }
-
-          item {
-            val browserPreferences = koinInject<BrowserPreferences>()
-            PreferenceCard {
-              // ── 照片预加载张数 ────────────────────────────────────────
-              // 照片浏览器会提前把「当前这张前后各 N 张」拉进缓存，滑过去时不白屏。
-              // 固定 1/2/3 三档：再大就是拿流量和内存换几乎感知不到的流畅度
-              // （全屏图一张十几 MB，缓存封顶后多预取的会被后来者顶掉，等于白预取）。
-              val preloadCount by browserPreferences.photoPreloadCount.collectAsState()
-              ListPreference(
-                icon = {
-                  Icon(
-                    Icons.Outlined.PhotoLibrary,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                  )
-                },
-                value = preloadCount.coerceIn(1, 3),
-                onValueChange = { browserPreferences.photoPreloadCount.set(it.coerceIn(1, 3)) },
-                values = listOf(1, 2, 3),
-                valueToText = { AnnotatedString("前后各 $it 张") },
-                modifier = Modifier.settingsAnchor("照片预加载张数"),
-                title = { Text(text = "照片预加载张数", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                summary = {
-                  Text(
-                    text = "前后各预取 ${preloadCount.coerceIn(1, 3)} 张，翻页更快；" +
-                      "张数越多占的内存和流量越多，缓存满时会自动淘汰最旧的",
-                    color = MaterialTheme.colorScheme.outline,
-                  )
-                },
-              )
-
-              PreferenceDivider()
-
-              // ── 照片幻灯片间隔 ────────────────────────────────────────
-              // 照片浏览器（图集）里「幻灯片播放」的翻页间隔。三档固定值，
-              // 不用滑块：常用就 3 / 5 / 10 秒，拖出来的中间值没有意义。
-              val slideshowInterval by browserPreferences.photoSlideshowInterval.collectAsState()
-              ListPreference(
-                icon = {
-                  Icon(
-                    Icons.Outlined.Slideshow,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                  )
-                },
-                value = slideshowInterval,
-                onValueChange = { browserPreferences.photoSlideshowInterval.set(it) },
-                values = PhotoSlideshowInterval.entries,
-                valueToText = { AnnotatedString("${it.seconds} 秒") },
-                modifier = Modifier.settingsAnchor("照片幻灯片间隔"),
-                title = { Text(text = "照片幻灯片间隔", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                summary = {
-                  Text(
-                    text = "照片浏览器幻灯片播放时，每 ${slideshowInterval.seconds} 秒自动翻到下一张",
-                    color = MaterialTheme.colorScheme.outline,
-                  )
-                },
-              )
-
-              PreferenceDivider()
-
-              // 进照片浏览器是否**直接开始**幻灯片。关 = 停在第一张自己滑 / 自己点播放键；
-              // 开 = 进去就按上面的间隔自动翻（适合当相框用）。默认关 ——
-              // 大多数人进浏览器是想先看这一张，自动翻会抢走控制权。
-              // 全局一份、不按库分：这是看照片的习惯，不是媒体库的属性。
-              val photoAutoSlideshow by browserPreferences.photoAutoSlideshow.collectAsState()
-              SwitchPreference(
-                icon = {
-                  Icon(
-                    Icons.Outlined.PlayCircle,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                  )
-                },
-                value = photoAutoSlideshow,
-                onValueChange = { browserPreferences.photoAutoSlideshow.set(it) },
-                modifier = Modifier.settingsAnchor("照片浏览器自动播放幻灯片"),
-                title = { Text(text = "照片浏览器自动播放幻灯片", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                summary = {
-                  Text(
-                    text = if (photoAutoSlideshow) {
-                      "打开照片即按间隔自动翻页，播放中可随时暂停"
-                    } else {
-                      "打开照片停在第一张，是否播放由你点播放键决定"
-                    },
-                    color = MaterialTheme.colorScheme.outline,
-                  )
-                },
-              )
-
-              PreferenceDivider()
-
-              // ── 底部胶片条 ────────────────────────────────────────────
-              // 照片浏览器底部那条缩略图。默认**关**：它要吃掉约 56dp 的画面高度，
-              // 而照片浏览器最值钱的就是画面面积；想要快速跳图的人自己打开。
-              val photoFilmstrip by browserPreferences.photoFilmstrip.collectAsState()
-              SwitchPreference(
-                icon = {
-                  Icon(
-                    Icons.Outlined.ViewComfy,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                  )
-                },
-                value = photoFilmstrip,
-                onValueChange = { browserPreferences.photoFilmstrip.set(it) },
-                modifier = Modifier.settingsAnchor("照片浏览器显示底部缩略图"),
-                title = { Text(text = "照片浏览器显示底部缩略图", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                summary = {
-                  Text(
-                    text = if (photoFilmstrip) {
-                      "底部显示一排缩略图，点一下跳到那张" +
-                        "（会占一点画面高度）"
-                    } else {
-                      "整屏只显示当前这张，画面最大"
-                    },
-                    color = MaterialTheme.colorScheme.outline,
-                  )
-                },
-              )
-            }
-          }
-
-          // ── Emby 卡片与封面 ────────────────────────────────────────
-          item {
-            PreferenceSectionHeader(title = "Emby 卡片外观")
-          }
-
-          item {
-            // 卡片外观（圆角 / 角标）—— 收口成设置，改一次全 App 的 Emby 卡片一起变
-            val browserPreferences = koinInject<BrowserPreferences>()
-            val cardCorner by browserPreferences.embyCardCorner.collectAsState()
-            val showCardBadges by browserPreferences.embyShowCardBadges.collectAsState()
-            val folderIconBlue by browserPreferences.embyFolderIconBlue.collectAsState()
-            val folderRandomCover by browserPreferences.embyFolderRandomCover.collectAsState()
-            PreferenceCard {
-              SliderPreference(
-                icon = {
-                  Icon(
-                    Icons.Outlined.RoundedCorner,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                  )
-                },
-                value = cardCorner.toFloat(),
-                onValueChange = { browserPreferences.embyCardCorner.set(it.roundToInt()) },
-                sliderValue = cardCorner.toFloat(),
-                onSliderValueChange = { browserPreferences.embyCardCorner.set(it.roundToInt()) },
-                modifier = Modifier.settingsAnchor("卡片圆角"),
-                title = { Text(text = "卡片圆角", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                valueRange = 0f..24f,
-                summary = {
-                  Text(
-                    text = "当前 ${cardCorner}dp · 全 App 的 Emby 卡片统一圆角",
-                    color = MaterialTheme.colorScheme.outline,
-                  )
-                },
-              )
-
-              PreferenceDivider()
-
-              SwitchPreference(
-                icon = {
-                  Icon(
-                    Icons.Outlined.Label,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                  )
-                },
-                value = showCardBadges,
-                onValueChange = { browserPreferences.embyShowCardBadges.set(it) },
-                modifier = Modifier.settingsAnchor("显示封面角标"),
-                title = { Text(text = "显示封面角标", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                summary = {
-                  Text(
-                    text = "在封面上显示播放进度条 / 作品数等角标；关闭后卡片更干净",
-                    color = MaterialTheme.colorScheme.outline,
-                  )
-                },
-              )
-
-              PreferenceDivider()
-
-              // 文件夹类型图标的颜色：白色对比度更高、与其它角标同语言（默认）；
-              // 蓝色更醒目但小尺寸在深炭底上会发灰，所以做成开关让用户自己选。
-              SwitchPreference(
-                icon = {
-                  Icon(
-                    Icons.Outlined.Folder,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                  )
-                },
-                value = folderIconBlue,
-                onValueChange = { browserPreferences.embyFolderIconBlue.set(it) },
-                modifier = Modifier.settingsAnchor("文件夹图标使用蓝色"),
-                title = { Text(text = "文件夹图标使用蓝色", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                summary = {
-                  Text(
-                    text = "媒体库文件夹卡片左下角的类型图标：打开为蓝色，关闭为白色（默认）",
-                    color = MaterialTheme.colorScheme.outline,
-                  )
-                },
-              )
-
-            }
-          }
-
-          // ── Emby 封面合成 ──────────────────────────────────────────
-          item {
-            PreferenceSectionHeader(title = "Emby 封面合成")
-          }
-
-          item {
-            val browserPreferences = koinInject<BrowserPreferences>()
-            val folderRandomCover by browserPreferences.embyFolderRandomCover.collectAsState()
-            PreferenceCard {
-              // 文件夹 / 合集卡片没有自己的封面，客户端会拉内部视频的图拼宫格。
-              // 开＝随机取样（每次可能不一样）；关＝按名称固定取前几张。
-              // 两种模式都会跳过没封面的条目、一直往后凑满四张，所以不会整张空白。
-              SwitchPreference(
-                icon = {
-                  Icon(
-                    Icons.Outlined.Widgets,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                  )
-                },
-                value = folderRandomCover,
-                onValueChange = { browserPreferences.embyFolderRandomCover.set(it) },
-                modifier = Modifier.settingsAnchor("合成随机封面图"),
-                title = { Text(text = "合成随机封面图", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                summary = {
-                  Text(
-                    text = "文件夹 / 合集卡片用内部视频的封面拼多宫格；打开后随机取样，" +
-                      "每次看到的封面可能不同。关闭则按名称固定取前几个。" +
-                      "没有封面的条目会自动跳过并往后补，直到凑满四张。",
-                    color = MaterialTheme.colorScheme.outline,
-                  )
-                },
-              )
-
-              // 合成策略：只在「随机合成」开着时才有意义 —— 固定模式取样结果是确定的，
-              // 重取还是同一批图，摆出来只是个死项。
-              if (folderRandomCover) {
-                val coverPolicy by browserPreferences.embyFolderCoverRefreshPolicy.collectAsState()
-                val coverHours by browserPreferences.embyFolderCoverRefreshHours.collectAsState()
-                val coverDays by browserPreferences.embyFolderCoverRefreshDays.collectAsState()
-                var editHours by remember { mutableStateOf(false) }
-                var editDays by remember { mutableStateOf(false) }
-
-                PreferenceDivider()
-
-                ListPreference(
-                  icon = {
-                    Icon(
-                      Icons.Outlined.Autorenew,
-                      contentDescription = null,
-                      tint = MaterialTheme.colorScheme.primary,
-                    )
-                  },
-                  value = coverPolicy,
-                  onValueChange = { picked ->
-                    browserPreferences.embyFolderCoverRefreshPolicy.set(picked)
-                    // 改策略 = 明确要求「按新规矩来」⇒ 把上次合成时间清零，
-                    // 下次进库一定重新合成一次。不清零的话选了「满 X 天」却半天看不到变化，
-                    // 用户会以为设置根本没生效。
-                    browserPreferences.embyFolderCoverLastSynthAt.set(0L)
-                  },
-                  values = FolderCoverRefreshPolicy.entries,
-                  valueToText = { AnnotatedString(it.label) },
-                  modifier = Modifier.settingsAnchor("重新合成策略"),
-                  title = { Text(text = "重新合成策略", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                  summary = {
-                    Text(
-                      text = "随机取样的封面每次都不一样，这一项决定多久换一批。" +
-                        "默认「仅下拉刷新时」：进出文件夹（含从子文件夹返回）不重取，" +
-                        "滑来滑去看到的还是同一批封面；选小时 / 天则在到期前同样完全复用、" +
-                        "不产生请求。下拉刷新始终立即重取，不受这里限制。",
-                      color = MaterialTheme.colorScheme.outline,
-                    )
-                  },
-                )
-
-                if (coverPolicy == FolderCoverRefreshPolicy.Hours) {
-                  PreferenceDivider()
-                  Preference(
-                    icon = {
-                      Icon(
-                        Icons.Outlined.Schedule,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                      )
-                    },
-                    modifier = Modifier.settingsAnchor("合成封面图间隔小时数"),
-                    title = { Text(text = "合成封面图间隔小时数", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                    summary = {
-                      Text(
-                        text = "当前 $coverHours 小时 · 取值范围 1~168",
-                        color = MaterialTheme.colorScheme.outline,
-                      )
-                    },
-                    onClick = { editHours = true },
-                  )
-                  }
-
-                if (coverPolicy == FolderCoverRefreshPolicy.Days) {
-                  PreferenceDivider()
-                  Preference(
-                    icon = {
-                      Icon(
-                        Icons.Outlined.DateRange,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                      )
-                    },
-                    modifier = Modifier.settingsAnchor("间隔天数"),
-                    title = { Text(text = "间隔天数", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                    summary = {
-                      Text(
-                        text = "当前 $coverDays 天 · 取值范围 1~30",
-                        color = MaterialTheme.colorScheme.outline,
-                      )
-                    },
-                    onClick = { editDays = true },
-                  )
-                  }
-
-                if (editHours) {
-                  IntervalInputDialog(
-                    title = "合成封面图间隔小时数",
-                    hint = "1~168 小时",
-                    current = coverHours,
-                    range = 1..168,
-                    onConfirm = { value ->
-                      browserPreferences.embyFolderCoverRefreshHours.set(value)
-                      browserPreferences.embyFolderCoverLastSynthAt.set(0L)
-                      editHours = false
-                    },
-                    onCancel = { editHours = false },
-                  )
-                }
-
-                if (editDays) {
-                  IntervalInputDialog(
-                    title = "间隔天数",
-                    hint = "1~30 天",
-                    current = coverDays,
-                    range = 1..30,
-                    onConfirm = { value ->
-                      browserPreferences.embyFolderCoverRefreshDays.set(value)
-                      browserPreferences.embyFolderCoverLastSynthAt.set(0L)
-                      editDays = false
-                    },
-                    onCancel = { editDays = false },
-                  )
-                }
-                }
-            }
-          }
-
-          // ── Emby 随机播放 ──────────────────────────────────────────
-          item {
-            PreferenceSectionHeader(title = "Emby 随机播放")
-          }
-
-          item {
-            // 随机播放的三项设置，放一起：**取多少条** + **单击/长按的分工** + **手势提示**。
-            //  · 数量：库里片子多的用户想要更长的一批，库小的觉得刷来刷去都是重复的；
-            //  · 分工：按文件夹组织片子的人要下钻，按「一层一批」组织的人天天只播当前层，
-            //    两边的常用手势正好相反 —— 所以给开关，不替用户定死；
-            //  · 提示：每次点都弹一句对老用户是噪音，但对手势不熟的人是唯一发现入口。
-            val browserPreferences = koinInject<BrowserPreferences>()
-            val randomCount by browserPreferences.randomPlayCount.collectAsState()
-            val drillDownOnTap by browserPreferences.embyRandomDrillDownOnTap.collectAsState()
-            val gestureToast by browserPreferences.embyRandomGestureToast.collectAsState()
-            var showRandomDialog by remember { mutableStateOf(false) }
-            PreferenceCard {
               Preference(
-                modifier = Modifier.settingsAnchor("随机播放视频数量"),
-                title = { Text(text = "随机播放视频数量", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                modifier = Modifier.settingsAnchor(R.string.pref_subtitles),
+                title = {
+                  Text(stringResource(R.string.pref_subtitles), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                },
                 summary = {
                   Text(
-                    text = "当前 $randomCount 条 · 用于随机播放、随机播放收藏与视界流",
+                    text = stringResource(R.string.pref_subtitles_summary),
                     color = MaterialTheme.colorScheme.outline,
                   )
                 },
                 icon = {
                   Icon(
-                    Icons.Outlined.Shuffle,
+                    Icons.Outlined.Subtitles,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary,
                   )
                 },
-                onClick = { showRandomDialog = true },
+                onClick = { backstack.add(SubtitlesPreferencesScreen) },
               )
 
               PreferenceDivider()
 
-              SwitchPreference(
-                icon = {
-                  Icon(
-                    Icons.Outlined.Layers,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                  )
-                },
-                value = drillDownOnTap,
-                onValueChange = { browserPreferences.embyRandomDrillDownOnTap.set(it) },
-                modifier = Modifier.settingsAnchor("随机播放默认下钻"),
-                title = { Text(text = "随机播放默认下钻", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                summary = {
-                  Text(
-                    // ⚠️ 括号不能省：`if (…) "A" else "B" + "C"` 会把后缀只拼给 else 那一支
-                    text = (
-                      if (drillDownOnTap) {
-                        "当前：单击含子文件夹、长按只播当前目录"
-                      } else {
-                        "当前：单击只播当前目录、长按含子文件夹"
-                      }
-                      ) + "（影响随机播放 / 随机播放收藏 / 视界流）",
-                    color = MaterialTheme.colorScheme.outline,
-                  )
-                },
-              )
-
-              PreferenceDivider()
-
-              // 手势提示总开关。关掉的只是「这次动作的范围说明」，
-              // **不关**「当前目录 / 范围内没有可播放内容」这类失败提示 ——
-              // 那是唯一的反馈，关掉就退化成「点了没反应」。
-              SwitchPreference(
-                icon = {
-                  Icon(
-                    Icons.Outlined.Gesture,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                  )
-                },
-                value = gestureToast,
-                onValueChange = { browserPreferences.embyRandomGestureToast.set(it) },
-                modifier = Modifier.settingsAnchor("显示手势提示"),
-                title = { Text(text = "显示手势提示", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                summary = {
-                  Text(
-                    text = "点击随机播放 / 随机播放收藏 / 视界流时，提示本次是「含子文件夹」还是" +
-                      "「只播当前目录」；关闭后不再提示，但取不到内容时仍会说明原因",
-                    color = MaterialTheme.colorScheme.outline,
-                  )
-                },
-              )
-            }
-            if (showRandomDialog) {
-              RandomPlayCountDialog(
-                current = randomCount,
-                onConfirm = { value ->
-                  showRandomDialog = false
-                  browserPreferences.randomPlayCount.set(value)
-                },
-                onCancel = { showRandomDialog = false },
-              )
-            }
-          }
-
-          // ── Emby 随机抽卡 ──────────────────────────────────────────
-          // 抽卡是「随机」这一族的独立入口（媒体库顶栏的骰子键），但它的**数量**语义
-          // 与「随机播放视频数量」完全不同：那边是一次取多少条进播放队列，这边是一次
-          // 开几张卡。混在同一张卡里，用户看到两个「数量」根本分不清谁管谁，所以单开一节。
-          item {
-            PreferenceSectionHeader(title = "Emby 随机抽卡")
-          }
-
-          item {
-            val browserPreferences = koinInject<BrowserPreferences>()
-            val drawCount by browserPreferences.embyGachaDrawCount.collectAsState()
-            PreferenceCard {
-              // 固定四档 1 / 3 / 5 / 10：抽卡是成批语义（单抽 / 十连），
-              // 填任意数字既没有仪式感、卡面网格也排不齐（见 BrowserPreferences 里的说明）。
-              // 摘要把「可选范围 / 默认值 / 上限」一次写全，用户不用点开才知道边界。
-              ListPreference(
-                icon = {
-                  Icon(
-                    Icons.Outlined.Casino,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                  )
-                },
-                value = drawCount.coerceIn(1, 10),
-                onValueChange = { browserPreferences.embyGachaDrawCount.set(it.coerceIn(1, 10)) },
-                values = listOf(1, 3, 5, 10),
-                valueToText = { AnnotatedString(if (it == 1) "1 张（单抽）" else "$it 张") },
-                modifier = Modifier.settingsAnchor("抽卡数量"),
-                title = { Text(text = "抽卡数量", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                summary = {
-                  Text(
-                    text = "当前 ${drawCount.coerceIn(1, 10)} 张 · 可选 1 / 3 / 5 / 10 张，" +
-                      "默认 1 张，上限 10 张；多张时结果页点某一张看详情并播放",
-                    color = MaterialTheme.colorScheme.outline,
-                  )
-                },
-              )
-              PreferenceDivider()
-              val gachaStyle by browserPreferences.embyGachaStyle.collectAsState()
-              // 揭晓动画：只在**单抽**生效，这里如实写清楚，不按当前数量去禁用 ——
-              // 用户完全可能先挑动画再改数量，禁用会让人以为选项坏了。
-              ListPreference(
-                icon = {
-                  Icon(
-                    Icons.Outlined.AutoAwesomeMotion,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                  )
-                },
-                value = gachaStyle,
-                onValueChange = { browserPreferences.embyGachaStyle.set(it) },
-                values = EmbyGachaStyle.entries,
-                valueToText = { AnnotatedString(it.label) },
-                modifier = Modifier.settingsAnchor("抽卡动画"),
-                title = { Text(text = "抽卡动画", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                summary = {
-                  Text(
-                    text = "当前「${gachaStyle.label}」 · 仅单抽（1 张）生效；" +
-                      "滚动揭晓是卡片自右向左滚动、先加速后减速停在中奖卡上；" +
-                      "多抽仍走经典翻牌",
-                    color = MaterialTheme.colorScheme.outline,
-                  )
-                },
-              )
-            }
-          }
-
-          // Advanced & About Section
-          item {
-            PreferenceSectionHeader(title = "安全与应用锁")
-          }
-
-          // 应用锁（b7）：未开启 → 先选方式（数字 PIN / 九宫格图案）再设凭证；
-          // 已开启 → 管理入口（改凭证 / 自动解锁开关 / 验证后关锁）。
-          item {
-            val appLockPreferences = koinInject<AppLockPreferences>()
-            val appLockEnabled by appLockPreferences.enabled.collectAsState()
-            val appLockMethod by appLockPreferences.method.collectAsState()
-            val appLockAutoUnlock by appLockPreferences.autoUnlock.collectAsState()
-            var showMethodPicker by remember { mutableStateOf(false) }
-            var showPinSetup by remember { mutableStateOf(false) }
-            var showPatternSetup by remember { mutableStateOf(false) }
-            var showManage by remember { mutableStateOf(false) }
-            var showChangeCredential by remember { mutableStateOf(false) }
-            var showDisableVerify by remember { mutableStateOf(false) }
-
-            val isPattern = appLockMethod == AppLockMethod.PATTERN
-            val methodLabel = stringResource(
-              if (isPattern) R.string.app_lock_method_pattern else R.string.app_lock_method_pin,
-            )
-            val autoBadge = stringResource(R.string.app_lock_auto_unlock_badge)
-
-            PreferenceCard {
               Preference(
-                modifier = Modifier.settingsAnchor(R.string.app_lock_title),
-                title = { Text(text = stringResource(R.string.app_lock_title), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                modifier = Modifier.settingsAnchor(R.string.pref_audio),
+                title = {
+                  Text(stringResource(R.string.pref_audio), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                },
                 summary = {
-                  val text = if (appLockEnabled) {
-                    val base = stringResource(R.string.app_lock_summary_on_format, methodLabel)
-                    if (appLockAutoUnlock) "$base · $autoBadge" else base
-                  } else {
-                    stringResource(R.string.app_lock_summary_off)
-                  }
-                  Text(text = text, color = MaterialTheme.colorScheme.outline)
+                  Text(
+                    text = stringResource(R.string.pref_audio_summary),
+                    color = MaterialTheme.colorScheme.outline,
+                  )
                 },
                 icon = {
                   Icon(
-                    if (isPattern) Icons.Outlined.Grid3x3 else Icons.Outlined.Lock,
+                    Icons.Outlined.Audiotrack,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary,
                   )
                 },
-                onClick = {
-                  if (appLockEnabled) showManage = true else showMethodPicker = true
-                },
+                onClick = { backstack.add(AudioPreferencesScreen) },
               )
-            }
-
-            if (showMethodPicker) {
-              UnlockMethodDialog(
-                onPickPin = {
-                  showMethodPicker = false
-                  showPinSetup = true
-                },
-                onPickPattern = {
-                  showMethodPicker = false
-                  showPatternSetup = true
-                },
-                onDismiss = { showMethodPicker = false },
-              )
-            }
-            if (showPinSetup) {
-              PinSetupDialog(
-                onDismiss = { showPinSetup = false },
-                onSet = { pin ->
-                  appLockPreferences.setPin(pin)
-                  appLockPreferences.enabled.set(true)
-                },
-              )
-            }
-            if (showPatternSetup) {
-              PatternSetupDialog(
-                onDismiss = { showPatternSetup = false },
-                onSet = { pattern ->
-                  appLockPreferences.setPattern(pattern)
-                  appLockPreferences.enabled.set(true)
-                },
-              )
-            }
-            if (showManage) {
-              AppLockManageDialog(
-                method = appLockMethod,
-                autoUnlock = appLockAutoUnlock,
-                onToggleAutoUnlock = { appLockPreferences.autoUnlock.set(it) },
-                onChangeCredential = {
-                  showManage = false
-                  showChangeCredential = true
-                },
-                onDisable = {
-                  showManage = false
-                  showDisableVerify = true
-                },
-                onDismiss = { showManage = false },
-              )
-            }
-            if (showChangeCredential) {
-              if (isPattern) {
-                PatternChangeDialog(
-                  onDismiss = { showChangeCredential = false },
-                  onVerify = appLockPreferences::verifyPattern,
-                  onSet = appLockPreferences::setPattern,
-                )
-              } else {
-                PinChangeDialog(
-                  onDismiss = { showChangeCredential = false },
-                  onVerify = appLockPreferences::verifyPin,
-                  onSet = appLockPreferences::setPin,
-                )
-              }
-            }
-            if (showDisableVerify) {
-              if (isPattern) {
-                PatternVerifyDialog(
-                  title = stringResource(R.string.app_lock_verify_title),
-                  message = stringResource(R.string.app_lock_change_verify_hint),
-                  onDismiss = { showDisableVerify = false },
-                  onVerify = appLockPreferences::verifyPattern,
-                  onVerified = { appLockPreferences.disable() },
-                )
-              } else {
-                PinVerifyDialog(
-                  title = stringResource(R.string.app_lock_verify_title),
-                  message = stringResource(R.string.app_lock_change_verify_hint),
-                  onDismiss = { showDisableVerify = false },
-                  onVerify = appLockPreferences::verifyPin,
-                  onVerified = { appLockPreferences.disable() },
-                )
-              }
             }
           }
 
@@ -1390,43 +366,45 @@ object PreferencesScreen : Screen {
           item {
             PreferenceCard {
               Preference(
-
                 modifier = Modifier.settingsAnchor(R.string.pref_advanced),
-                title = { Text(text = stringResource(R.string.pref_advanced), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                summary = { 
-                  Text(
-                    text = stringResource(id = R.string.pref_advanced_summary),
-                    color = MaterialTheme.colorScheme.outline
-                  ) 
+                title = {
+                  Text(stringResource(R.string.pref_advanced), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 },
-                icon = { 
+                summary = {
+                  Text(
+                    text = stringResource(R.string.pref_advanced_summary),
+                    color = MaterialTheme.colorScheme.outline,
+                  )
+                },
+                icon = {
                   Icon(
-                    Icons.Outlined.Code, 
+                    Icons.Outlined.Code,
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary
-                  ) 
+                    tint = MaterialTheme.colorScheme.primary,
+                  )
                 },
                 onClick = { backstack.add(AdvancedPreferencesScreen) },
               )
-              
-              PreferenceDivider()
-              
-              Preference(
 
+              PreferenceDivider()
+
+              Preference(
                 modifier = Modifier.settingsAnchor(R.string.pref_about_title),
-                title = { Text(text = stringResource(id = R.string.pref_about_title), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                summary = { 
-                  Text(
-                    text = stringResource(id = R.string.pref_about_summary),
-                    color = MaterialTheme.colorScheme.outline
-                  ) 
+                title = {
+                  Text(stringResource(R.string.pref_about_title), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 },
-                icon = { 
+                summary = {
+                  Text(
+                    text = stringResource(R.string.pref_about_summary),
+                    color = MaterialTheme.colorScheme.outline,
+                  )
+                },
+                icon = {
                   Icon(
-                    Icons.Outlined.Info, 
+                    Icons.Outlined.Info,
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary
-                  ) 
+                    tint = MaterialTheme.colorScheme.primary,
+                  )
                 },
                 onClick = { backstack.add(AboutScreen) },
               )
@@ -1437,144 +415,3 @@ object PreferencesScreen : Screen {
     }
   }
 }
-
-/**
- * 缓存占用的人类可读格式（KB / MB / GB）。
- *
- * 三个设置项都要报「当前占用」（图片缓存 / 播放缓存 / …），所以放在
- * 顶层而不是留在文件私有 —— 复制一份到别处的结果就是两边的单位进位
- * 哪天对不上，用户看到两个数不一致会以为其中一处算错了。
- */
-fun formatCacheBytes(bytes: Long): String =
-  when {
-    bytes >= 1L shl 30 -> "%.2f GB".format(bytes.toDouble() / (1L shl 30))
-    bytes >= 1L shl 20 -> "%.1f MB".format(bytes.toDouble() / (1L shl 20))
-    bytes >= 1L shl 10 -> "%.1f KB".format(bytes.toDouble() / (1L shl 10))
-    else -> "$bytes B"
-  }
-
-/**
- * 「随机播放视频数量」的输入框。
- *
- * 只接受数字（[Char.isDigit] 逐字符过滤），确认时再夹到 1~500 —— 空串 / 越界
- * 一律回落到默认值 100，而不是 disabling 按钮不给任何反馈：
- * 用户填了个 0 却点不动「确定」，他会以为是 App 坏了。
- */
-@Composable
-private fun RandomPlayCountDialog(
-  current: Int,
-  onConfirm: (Int) -> Unit,
-  onCancel: () -> Unit,
-) {
-  var text by remember { mutableStateOf(current.toString()) }
-  AlertDialog(
-    onDismissRequest = onCancel,
-    title = { Text(text = "随机播放视频数量", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-    text = {
-      Column {
-        Text(
-          text = "取值 1~500。数量越大，每次随机取片越慢；视界流的一批视频也按这个数量来。",
-          style = MaterialTheme.typography.bodySmall,
-          color = MaterialTheme.colorScheme.outline,
-        )
-        Spacer(modifier = Modifier.height(12.dp))
-        OutlinedTextField(
-          value = text,
-          onValueChange = { input -> text = input.filter(Char::isDigit).take(3) },
-          singleLine = true,
-          label = { Text(text = "数量") },
-        )
-      }
-    },
-    confirmButton = {
-      TextButton(
-        onClick = { onConfirm(text.toIntOrNull()?.coerceIn(1, 500) ?: 100) },
-      ) {
-        Text(text = "确定")
-      }
-    },
-    dismissButton = {
-      TextButton(onClick = onCancel) { Text(text = "取消") }
-    },
-  )
-}
-
-/**
- * 「间隔 X 小时 / X 天」的数字输入框（合成随机封面图的策略用）。
- *
- * 与 [RandomPlayCountDialog] 同一套做法：逐字符过滤非数字，确认时夹到 [range]。
- * 空串 / 越界一律回落到 [current]（而不是 disabled 掉「确定」）—— 用户填了个 0
- * 却点不动按钮，他会以为 App 坏了。
- *
- * 与上面那个的唯一差别是范围来自参数：小时 1~168、天 1~30 共用这一个组件，
- * 免得两处各写一份「过滤 + 夹取」将来漂移。
- */
-@Composable
-private fun IntervalInputDialog(
-  title: String,
-  hint: String,
-  current: Int,
-  range: IntRange,
-  onConfirm: (Int) -> Unit,
-  onCancel: () -> Unit,
-) {
-  var text by remember { mutableStateOf(current.toString()) }
-  AlertDialog(
-    onDismissRequest = onCancel,
-    title = { Text(text = title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-    text = {
-      Column {
-        Text(
-          text = "取值 $hint。改完会立刻重新合成一次，之后按这个间隔换新。",
-          style = MaterialTheme.typography.bodySmall,
-          color = MaterialTheme.colorScheme.outline,
-        )
-        Spacer(modifier = Modifier.height(12.dp))
-        OutlinedTextField(
-          value = text,
-          onValueChange = { input -> text = input.filter(Char::isDigit).take(3) },
-          singleLine = true,
-          label = { Text(text = "间隔") },
-        )
-      }
-    },
-    confirmButton = {
-      TextButton(
-        onClick = { onConfirm(text.toIntOrNull()?.coerceIn(range) ?: current) },
-      ) {
-        Text(text = "确定")
-      }
-    },
-    dismissButton = {
-      TextButton(onClick = onCancel) { Text(text = "取消") }
-    },
-  )
-}
-
-/**
- * [MediaSourcePreference] 的显示文案。
- *
- * 单独抽出来是因为同一段文案出现在两处（下拉当前值 + 下拉展开后的每一条），
- * 各写一遍就会漂移。
- *
- * ⚠️ 用 `when` 而不是 `when` + else 兜底丢 default：
- * 将来加了一个枚举值却忘了这里，编译期就报错（穷尽匹配），
- * 比运行时显示成空白好。
- */
-@Composable
-private fun mediaSourcePreferenceLabel(preference: MediaSourcePreference): String =
-  when (preference) {
-    MediaSourcePreference.DEFAULT -> stringResource(R.string.media_source_pref_default)
-    MediaSourcePreference.HIGHEST_RESOLUTION ->
-      stringResource(R.string.media_source_pref_highest_resolution)
-    MediaSourcePreference.LOWEST_RESOLUTION ->
-      stringResource(R.string.media_source_pref_lowest_resolution)
-    MediaSourcePreference.HIGHEST_BITRATE ->
-      stringResource(R.string.media_source_pref_highest_bitrate)
-    MediaSourcePreference.LOWEST_BITRATE ->
-      stringResource(R.string.media_source_pref_lowest_bitrate)
-    MediaSourcePreference.SMALLEST_SIZE ->
-      stringResource(R.string.media_source_pref_smallest_size)
-    MediaSourcePreference.BEST_QUALITY_PER_SIZE ->
-      stringResource(R.string.media_source_pref_best_quality_per_size)
-  }

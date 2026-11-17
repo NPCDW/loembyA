@@ -45,8 +45,8 @@ android {
     targetSdk = 36
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     // versionCode 决定能否覆盖安装：每发一版都要涨（APK 里的最终值 = versionCode * 10 + ABI 码）
-    versionCode = 240
-    versionName = "0.3.0"
+    versionCode = 241
+    versionName = "0.4.0"
 
     vectorDrawables {
       useSupportLibrary = true
@@ -310,8 +310,8 @@ room {
 
 dependencies {
   implementation(libs.androidx.activity.compose)
-  // 应用锁判「是不是真的退出了 App」用 ProcessLifecycleOwner（进程级生命周期）——
-  // 它不在 activity-compose 的传递依赖里，必须显式声明；版本与 lifecycle-runtime 对齐（2.10.0）。
+  // PostgreSQL 验证通过后用 ProcessLifecycleOwner 管理共享数据的前台刷新。
+  // 进程生命周期不是 activity-compose 的传递依赖，版本与 lifecycle-runtime 对齐。
   implementation("androidx.lifecycle:lifecycle-process:2.10.0")
   implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")
   implementation(platform(libs.androidx.compose.bom))

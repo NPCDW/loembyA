@@ -19,22 +19,27 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material.icons.outlined.BrightnessMedium
+import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.PanTool
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.SkipNext
 import androidx.compose.material.icons.outlined.SkipPrevious
+import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.Straighten
 import androidx.compose.material.icons.outlined.Swipe
 import androidx.compose.material.icons.outlined.SwipeRight
 import androidx.compose.material.icons.outlined.Timer
 import androidx.compose.material.icons.outlined.TouchApp
+import androidx.compose.material.icons.outlined.Tune
+import androidx.compose.material.icons.outlined.VolumeUp
+import androidx.compose.material.icons.outlined.ZoomIn
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -45,18 +50,22 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import app.marlboroadvance.mpvex.R
 import app.marlboroadvance.mpvex.preferences.GesturePreferences
+import app.marlboroadvance.mpvex.preferences.PlayerPreferences
 import app.marlboroadvance.mpvex.preferences.preference.collectAsState
 import app.marlboroadvance.mpvex.presentation.Screen
 import app.marlboroadvance.mpvex.ui.player.CustomKeyCodes
 import app.marlboroadvance.mpvex.ui.player.SingleActionGesture
+import app.marlboroadvance.mpvex.ui.player.controls.components.sheets.toFixed
 import app.marlboroadvance.mpvex.ui.utils.LocalBackStack
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.serialization.Serializable
 import me.zhanghai.compose.preference.FooterPreference
 import me.zhanghai.compose.preference.ListPreference
 import me.zhanghai.compose.preference.ProvidePreferenceLocals
+import me.zhanghai.compose.preference.SliderPreference
 import me.zhanghai.compose.preference.SwitchPreference
 import org.koin.compose.koinInject
+import kotlin.math.roundToInt
 
 @Serializable
 object GesturePreferencesScreen : Screen {
@@ -64,7 +73,7 @@ object GesturePreferencesScreen : Screen {
   @Composable
   override fun Content() {
     val preferences = koinInject<GesturePreferences>()
-    val context = LocalContext.current
+    val playerPreferences = koinInject<PlayerPreferences>()
     val backstack = LocalBackStack.current
     val useSingleTapForCenter by preferences.useSingleTapForCenter.collectAsState()
 
@@ -104,6 +113,292 @@ object GesturePreferencesScreen : Screen {
               .fillMaxSize()
               .padding(padding),
         ) {
+          item {
+            PreferenceSectionHeader(title = stringResource(R.string.pref_player_gestures))
+          }
+
+          item {
+            PreferenceCard {
+              val brightnessGesture by playerPreferences.brightnessGesture.collectAsState()
+              SwitchPreference(
+                icon = {
+                  Icon(
+                    Icons.Outlined.BrightnessMedium,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                  )
+                },
+                value = brightnessGesture,
+                onValueChange = playerPreferences.brightnessGesture::set,
+                modifier = Modifier.settingsAnchor(R.string.pref_player_gestures_brightness),
+                title = {
+                  Text(
+                    stringResource(R.string.pref_player_gestures_brightness),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                  )
+                },
+              )
+
+              PreferenceDivider()
+
+              val volumeGesture by playerPreferences.volumeGesture.collectAsState()
+              SwitchPreference(
+                icon = {
+                  Icon(
+                    Icons.Outlined.VolumeUp,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                  )
+                },
+                value = volumeGesture,
+                onValueChange = playerPreferences.volumeGesture::set,
+                modifier = Modifier.settingsAnchor(R.string.pref_player_gestures_volume),
+                title = {
+                  Text(
+                    stringResource(R.string.pref_player_gestures_volume),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                  )
+                },
+              )
+
+              PreferenceDivider()
+
+              val pinchToZoomGesture by playerPreferences.pinchToZoomGesture.collectAsState()
+              SwitchPreference(
+                icon = {
+                  Icon(
+                    Icons.Outlined.ZoomIn,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                  )
+                },
+                value = pinchToZoomGesture,
+                onValueChange = playerPreferences.pinchToZoomGesture::set,
+                modifier = Modifier.settingsAnchor(R.string.pref_player_gestures_pinch_to_zoom),
+                title = {
+                  Text(
+                    stringResource(R.string.pref_player_gestures_pinch_to_zoom),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                  )
+                },
+              )
+
+              PreferenceDivider()
+
+              val horizontalSwipeToSeek by playerPreferences.horizontalSwipeToSeek.collectAsState()
+              SwitchPreference(
+                icon = {
+                  Icon(
+                    Icons.Outlined.Swipe,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                  )
+                },
+                value = horizontalSwipeToSeek,
+                onValueChange = playerPreferences.horizontalSwipeToSeek::set,
+                modifier = Modifier.settingsAnchor(R.string.pref_player_gestures_horizontal_swipe_to_seek),
+                title = {
+                  Text(
+                    stringResource(R.string.pref_player_gestures_horizontal_swipe_to_seek),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                  )
+                },
+              )
+
+              PreferenceDivider()
+
+              val horizontalSwipeSensitivity by playerPreferences.horizontalSwipeSensitivity.collectAsState()
+              SliderPreference(
+                icon = {
+                  Icon(
+                    Icons.Outlined.Tune,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                  )
+                },
+                value = horizontalSwipeSensitivity,
+                onValueChange = { playerPreferences.horizontalSwipeSensitivity.set(it.toFixed(3)) },
+                modifier = Modifier.settingsAnchor(R.string.pref_player_gestures_horizontal_swipe_sensitivity),
+                title = {
+                  Text(
+                    stringResource(R.string.pref_player_gestures_horizontal_swipe_sensitivity),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                  )
+                },
+                valueRange = 0.020f..0.1f,
+                summary = {
+                  val sensitivityPercent = (horizontalSwipeSensitivity * 1000).toInt()
+                  val sensitivityLabel = when {
+                    sensitivityPercent < 30 -> "Low"
+                    sensitivityPercent < 55 -> "Medium"
+                    else -> "High"
+                  }
+                  Text(
+                    "Current: $sensitivityPercent/100 ($sensitivityLabel)",
+                    color = MaterialTheme.colorScheme.outline,
+                  )
+                },
+                onSliderValueChange = { playerPreferences.horizontalSwipeSensitivity.set(it.toFixed(3)) },
+                sliderValue = horizontalSwipeSensitivity,
+              )
+
+              PreferenceDivider()
+
+              val hapticFeedbackEnabled by playerPreferences.hapticFeedbackEnabled.collectAsState()
+              SwitchPreference(
+                icon = {
+                  Icon(
+                    Icons.Outlined.Notifications,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                  )
+                },
+                value = hapticFeedbackEnabled,
+                onValueChange = playerPreferences.hapticFeedbackEnabled::set,
+                modifier = Modifier.settingsAnchor(R.string.pref_player_haptic_feedback),
+                title = {
+                  Text(
+                    stringResource(R.string.pref_player_haptic_feedback),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                  )
+                },
+                summary = {
+                  Text(
+                    text = stringResource(R.string.pref_player_haptic_feedback_summary),
+                    color = MaterialTheme.colorScheme.outline,
+                  )
+                },
+              )
+
+              PreferenceDivider()
+
+              val holdForMultipleSpeed by playerPreferences.holdForMultipleSpeed.collectAsState()
+              SliderPreference(
+                icon = {
+                  Icon(
+                    Icons.Outlined.Speed,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                  )
+                },
+                value = holdForMultipleSpeed,
+                onValueChange = { playerPreferences.holdForMultipleSpeed.set(it.toFixed(2)) },
+                modifier = Modifier.settingsAnchor(R.string.pref_player_gestures_hold_for_multiple_speed),
+                title = {
+                  Text(
+                    stringResource(R.string.pref_player_gestures_hold_for_multiple_speed),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                  )
+                },
+                valueRange = 0f..6f,
+                summary = {
+                  Text(
+                    if (holdForMultipleSpeed == 0F) {
+                      stringResource(R.string.generic_disabled)
+                    } else {
+                      "%.2fx".format(holdForMultipleSpeed)
+                    },
+                    color = MaterialTheme.colorScheme.outline,
+                  )
+                },
+                onSliderValueChange = { playerPreferences.holdForMultipleSpeed.set(it.toFixed(2)) },
+                sliderValue = holdForMultipleSpeed,
+              )
+
+              PreferenceDivider()
+
+              val showDynamicSpeedOverlay by playerPreferences.showDynamicSpeedOverlay.collectAsState()
+              SwitchPreference(
+                icon = {
+                  Icon(
+                    Icons.Outlined.Speed,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                  )
+                },
+                value = showDynamicSpeedOverlay,
+                onValueChange = playerPreferences.showDynamicSpeedOverlay::set,
+                modifier = Modifier.settingsAnchor("动态倍速浮层"),
+                title = { Text("动态倍速浮层", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                summary = {
+                  Text(
+                    stringResource(R.string.i18n_speed_overlay_hint),
+                    color = MaterialTheme.colorScheme.outline,
+                  )
+                },
+              )
+            }
+          }
+
+          item {
+            PreferenceSectionHeader(title = stringResource(R.string.pref_player_seeking_title))
+          }
+
+          item {
+            PreferenceCard {
+              val usePreciseSeeking by playerPreferences.usePreciseSeeking.collectAsState()
+              SwitchPreference(
+                icon = {
+                  Icon(
+                    Icons.Outlined.Straighten,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                  )
+                },
+                value = usePreciseSeeking,
+                onValueChange = playerPreferences.usePreciseSeeking::set,
+                modifier = Modifier.settingsAnchor(R.string.pref_player_use_precise_seeking),
+                title = {
+                  Text(
+                    stringResource(R.string.pref_player_use_precise_seeking),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                  )
+                },
+              )
+
+              PreferenceDivider()
+
+              val customSkipDuration by playerPreferences.customSkipDuration.collectAsState()
+              SliderPreference(
+                icon = {
+                  Icon(
+                    Icons.Outlined.Timer,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                  )
+                },
+                value = customSkipDuration.toFloat(),
+                onValueChange = { playerPreferences.customSkipDuration.set(it.roundToInt()) },
+                modifier = Modifier.settingsAnchor(R.string.pref_player_custom_skip_duration_title),
+                title = {
+                  Text(
+                    stringResource(R.string.pref_player_custom_skip_duration_title),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                  )
+                },
+                valueRange = 5f..180f,
+                summary = {
+                  val summaryText = stringResource(R.string.pref_player_custom_skip_duration_summary)
+                  Text(
+                    "$summaryText ($customSkipDuration s)",
+                    color = MaterialTheme.colorScheme.outline,
+                  )
+                },
+                onSliderValueChange = { playerPreferences.customSkipDuration.set(it.roundToInt()) },
+                sliderValue = customSkipDuration.toFloat(),
+              )
+            }
+          }
+
           item {
             PreferenceSectionHeader(title = stringResource(R.string.pref_gesture_double_tap_title))
           }
@@ -304,7 +599,6 @@ object GesturePreferencesScreen : Screen {
           
           PreferenceDivider()
 
-          val useSingleTapForCenter by preferences.useSingleTapForCenter.collectAsState()
           SwitchPreference(
             icon = {
               Icon(

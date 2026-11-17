@@ -67,8 +67,6 @@
   <!-- Player Preferences Hardcoded -->
   <string name="pref_autoplay_title">Enable next/previous navigation</string>
   <string name="pref_autoplay_summary">Show next/previous buttons for all videos in folder</string>
-  <string name="pref_autoplay_next_video_title">Autoplay next video</string>
-  <string name="pref_autoplay_next_video_summary">Automatically play next video when current ends</string>
   <string name="pref_auto_pip_title">Auto Picture-in-Picture</string>
   <string name="pref_auto_pip_summary">Automatically enter PIP mode when pressing home or back</string>
   <string name="pref_dynamic_speed_overlay_title">Dynamic Speed Overlay</string>
@@ -91,7 +89,7 @@
   <string name="pref_clear_thumbnail_cache_title">Clear thumbnail cache</string>
   <string name="pref_clear_thumbnail_cache_summary">Delete all cached video thumbnails (will regenerate as you browse folders)</string>
   <string name="pref_player">Player</string>
-  <string name="pref_player_summary">Orientation, gestures and controls</string>
+  <string name="pref_player_summary">Playback and controls</string>
   <string name="pref_player_orientation">Orientation</string>
   <string name="pref_player_orientation_free">Free</string>
   <string name="pref_player_orientation_video">Video</string>
@@ -101,15 +99,10 @@
   <string name="pref_player_orientation_landscape">Landscape</string>
   <string name="pref_player_orientation_reverse_landscape">Reverse landscape</string>
   <string name="pref_player_orientation_sensor_landscape">Sensor landscape</string>
-  <string name="pref_player_save_position_on_quit">Save position on quit</string>
   <string name="pref_player_double_tap_seek_duration">Double tap seek duration</string>
   <string name="pref_player_custom_skip_duration_title">Custom skip duration</string>
   <string name="pref_player_custom_skip_duration_summary">Duration to skip forward on custom skip button</string>
   <string name="pref_player_seeking_title">Seeking</string>
-  <string name="pref_player_close_after_eof">Close after the end of playback</string>
-  <string name="pref_player_remember_brightness">Remember display brightness</string>
-  <string name="pref_player_remember_series_brightness">Remember brightness per series</string>
-  <string name="pref_player_remember_series_brightness_summary">Restore the brightness you last used for each series instead of one shared value</string>
   <string name="pref_player_gestures">Gestures</string>
   <string name="pref_player_gestures_brightness">Brightness gestures</string>
   <string name="pref_player_gestures_volume">Volume gestures</string>
@@ -122,13 +115,11 @@
   <string name="pref_player_haptic_feedback_summary">Vibrate briefly while swiping to seek and while adjusting playback speed</string>
   <string name="pref_player_gestures_hold_for_multiple_speed">Hold for multi - x speed</string>
   <string name="pref_player_controls">Controls</string>
-  <string name="pref_player_controls_allow_gestures_in_panels">Allow gestures in panels</string>
-  <string name="pref_player_controls_show_loading_circle">Show loading circle</string>
   <string name="pref_player_display_show_status_bar">Show system status bar with controls</string>
   <string name="pref_player_display_panel_opacity">Panel opacity</string>
   <string name="pref_player_display">Display</string>
   <string name="pref_gesture">Gestures</string>
-  <string name="pref_gesture_summary">Double tap, media controls</string>
+  <string name="pref_gesture_summary">Swipes, zoom, seeking, hold speed, double tap and media controls</string>
   <string name="pref_gesture_double_tap_title">Double tap</string>
   <string name="pref_gesture_double_tap_none">None</string>
   <string name="pref_gesture_double_tap_seek">Seek</string>
@@ -185,8 +176,6 @@
   <string name="pref_custom_lua_summary">Manage custom player buttons with Lua code</string>
   <string name="pref_preferred_languages">Preferred languages</string>
   <string name="pref_subtitles_fonts_dir">Fonts directory</string>
-  <string name="pref_subtitles_autoload_title">Automatically load subtitles</string>
-  <string name="pref_subtitles_autoload_summary">Automatically load external subtitles with the same name.</string>
   <string name="pref_audio">Audio</string>
   <string name="pref_audio_summary">Preferred languages, audio channels, pitch correction</string>
   <string name="pref_audio_pitch_correction_title">Enable audio pitch correction</string>
@@ -197,14 +186,6 @@
   <string name="pref_audio_normalization_light">Light</string>
   <string name="pref_audio_normalization_medium">Medium</string>
   <string name="pref_audio_normalization_strong">Strong</string>
-  <string name="pref_auto_crop_black_bars_title">Auto-crop black bars</string>
-  <string name="pref_auto_crop_black_bars_summary">Detect and crop letterbox / pillarbox bars on every new video</string>
-  <string name="player_toggle_auto_crop_on">On — detected on every video</string>
-  <string name="player_toggle_auto_crop_off">Off — detect manually from Quick actions</string>
-  <string name="player_action_auto_crop">Auto-crop bars</string>
-  <string name="player_crop_applied">Black bars cropped</string>
-  <string name="player_crop_failed">No black bars detected</string>
-  <string name="player_crop_off">Cropping removed</string>
   <string name="player_speed_decrease">Decrease speed by 0.05x</string>
   <string name="player_speed_increase">Increase speed by 0.05x</string>
   <string name="pref_audio_channels">Audio channels</string>
@@ -231,11 +212,8 @@
   <string name="pref_advanced_clear_fonts_cache">Clear cached fonts</string>
   <string name="pref_advanced_cleared_fonts_cache">Cleared cached fonts</string>
   <string name="pref_advanced_features_tooltip">Enable experimental or advanced features such as stats page and Anime4K upscaling</string>
-  <string name="pref_anime4k_title">Anime4K upscaling (Experimental)</string>
-  <string name="pref_anime4k_summary">Enable Anime4K upscaling filter</string>
   <string name="pref_anime4k_incompatibility">Anime4K Incompatibility</string>
   <string name="pref_anime4k_gpu_next_error">gpu-next is incompatible with Anime4K shaders. When Anime4K is enabled, the app will automatically use the legacy \'gpu\' backend for shader compatibility.</string>
-  <string name="pref_anime4k_cannot_use_with_gpu_next">Cannot use Anime4K when gpu-next is enabled</string>
   <string name="anime4k_mode_title">Anime4K Presets</string>
   <string name="anime4k_mode_toast">Anime4K: Preset %1$s</string>
   <string name="anime4k_quality_title">Anime4K Variants</string>
@@ -318,7 +296,8 @@
   <string name="toast_playback_failed">Playback failed: the media could not be opened</string>
   <string name="volume_slider_absolute_value" translatable="false">%d</string>
   <string name="github_repo_url" translatable="false">https://github.com/NPCDW/loembyA</string>
-  <string name="pref_player_display_hide_player_control_time">Hide player control time</string>
+  <string name="pref_player_display_hide_player_control_time">Hide player controls after</string>
+  <string name="pref_player_control_hide_never">Never</string>
   <plurals name="seconds">
     <item quantity="one">%1$d second</item>
     <item quantity="other">%1$d seconds</item>
@@ -357,12 +336,8 @@
   <string name="notification_playing">Playing</string>
   <!-- Media Info Activity -->
   <string name="pref_player_use_precise_seeking">Use precise seeking</string>
-  <string name="pref_player_disk_cache">Temporary disk buffering</string>
   <string name="player_buffering">Buffering…</string>
   <string name="player_buffering_progress">Buffering… %1$d%%</string>
-  <string name="pref_player_disk_cache_summary">Buffer demuxer data on disk during playback and remove it on close; no offline playback or reuse across sessions</string>
-  <string name="pref_player_clear_disk_cache">Clear stream cache</string>
-  <string name="pref_player_clear_disk_cache_summary">Delete cached Emby stream data</string>
   <!-- Additional strings for Chinese translation compatibility -->
   <string name="settings">Settings</string>
   <string name="export_settings">Export settings</string>
@@ -370,7 +345,6 @@
   <string name="clear_config_cache">Clear config cache</string>
   <string name="clear_thumbnail_cache">Clear thumbnail cache</string>
   <string name="double_tap_seek_area_width">Double tap seek area width</string>
-  <string name="autoplay_next_video">Autoplay next video</string>
   <string name="enable_next_previous_navigation">Enable next/previous navigation</string>
   <string name="recently_played">Recently played</string>
   <string name="install">Install</string>
@@ -437,15 +411,6 @@
   <string name="player_control_rewind_10s">Back %1$d seconds</string>
   <string name="player_control_forward_10s">Forward %1$d seconds</string>
   <string name="player_battery_percent">%1$d%%</string>
-  <string name="pref_media_source_pref_title">Preferred version</string>
-  <string name="pref_media_source_pref_summary">When a title has multiple versions, pick one automatically by this rule</string>
-  <string name="media_source_pref_default">Follow server default</string>
-  <string name="media_source_pref_highest_resolution">Highest resolution</string>
-  <string name="media_source_pref_lowest_resolution">Lowest resolution (saves data)</string>
-  <string name="media_source_pref_highest_bitrate">Highest bitrate</string>
-  <string name="media_source_pref_lowest_bitrate">Lowest bitrate (saves data)</string>
-  <string name="media_source_pref_smallest_size">Smallest file size</string>
-  <string name="media_source_pref_best_quality_per_size">Best quality, then smaller file</string>
   <string name="player_control_playback_speed">Playback Speed</string>
   <string name="player_control_slide_to_unlock">Slide to unlock</string>
   <string name="player_control_back">Back</string>
@@ -494,8 +459,6 @@
   <!-- ===== 播放器「更多」面板 ===== -->
   <string name="player_engine_switch_unavailable">Cannot switch engine: no playable source</string>
 
-  <string name="player_toggle_autoplay_on">Automatically play the next video</string>
-  <string name="player_toggle_autoplay_off">Stay on the current video</string>
   <string name="player_toggle_close_eof">Close player when finished</string>
   <string name="player_toggle_close_eof_on">Return to the list when playback ends</string>
   <string name="player_toggle_close_eof_off">Keep the player open when playback ends</string>
@@ -511,7 +474,6 @@
   <string name="i18n_mediainfo_analyzing">Analyzing media file...</string>
   <string name="i18n_auto_check_updates">Auto Check for Updates</string>
   <string name="i18n_auto_pip_hint">Automatically enter PIP mode when pressing home or back</string>
-  <string name="i18n_autoplay_next_video">Autoplay next video</string>
   <string name="i18n_folder_same">Cannot select the same folder</string>
   <string name="i18n_check_on_startup">Check on startup</string>
   <string name="i18n_clear_config_cache">Clear config cache</string>
@@ -631,12 +593,6 @@
   <string name="i18n_ack_aboutlibraries_summary">Generates the open-source license list on this screen.</string>
   <string name="i18n_ack_telephoto_summary">Pinch-to-zoom / pan / double-tap zoom gestures for the photo browser.</string>
   <string name="i18n_ack_coil_summary">Image loading, sampling and caching layer for the photo browser and photo grid.</string>
-  <string name="pref_remember_subtitle_track_title">Remember subtitle track per series</string>
-  <string name="pref_remember_subtitle_track_summary_on">Matched by language + codec; the next episode auto-selects the same subtitle track</string>
-  <string name="pref_remember_subtitle_track_summary_off">Every episode picks subtitles by the default language rules</string>
-  <string name="pref_remember_global_speed_title">Remember playback speed globally</string>
-  <string name="pref_remember_global_speed_summary_on">Next playback starts at the last speed you used (per-series memory still takes priority)</string>
-  <string name="pref_remember_global_speed_summary_off">Every playback starts at the default speed</string>
   <string name="pref_auto_skip_intro_title">Auto-skip intro</string>
   <string name="pref_auto_skip_intro_summary_on">Uses server intro markers when available, otherwise skips the first fixed duration after playback starts</string>
   <string name="pref_auto_skip_intro_summary_off">Show a tappable "Skip intro" pill while inside the intro</string>
@@ -660,44 +616,6 @@
   <string name="danmaku_app_secret">App secret</string>
   <string name="danmaku_credential_hint">Leave empty to skip the official source (works with self-hosted servers). When filled in, the app must be submitted for review on the open platform.</string>
 
-  <!-- 应用锁（b7） -->
-  <string name="app_lock_title">App lock</string>
-  <string name="app_lock_summary_off">Off</string>
-  <string name="app_lock_summary_on">On</string>
-  <string name="app_lock_unlock_title">Enter your PIN to unlock</string>
-  <string name="app_lock_cooldown">Too many attempts. Try again in %1$d s</string>
-  <string name="app_lock_wrong_pin">Incorrect PIN</string>
-  <string name="app_lock_key_delete">Delete</string>
-  <string name="app_lock_pin_setup_title">Set PIN</string>
-  <string name="app_lock_pin_confirm_title">Confirm PIN</string>
-  <string name="app_lock_pin_setup_hint">Enter 4–6 digits as your PIN</string>
-  <string name="app_lock_pin_confirm_hint">Enter the same PIN again</string>
-  <string name="app_lock_pin_mismatch">PINs don\'t match. Start over</string>
-  <string name="app_lock_pin_too_short">PIN must be at least 4 digits</string>
-  <string name="app_lock_verify_title">Verify PIN</string>
-  <string name="app_lock_change_verify_hint">Enter your current PIN to continue</string>
-  <string name="app_lock_manage_message">App lock is on. Change the credential, toggle auto-unlock, or verify to turn it off.</string>
-  <string name="app_lock_change_pin">Change PIN</string>
-  <string name="app_lock_disable">Turn off app lock</string>
-  <string name="app_lock_method_title">Choose unlock method</string>
-  <string name="app_lock_method_pin">Numeric PIN</string>
-  <string name="app_lock_method_pin_desc">4–6 digits on a keypad</string>
-  <string name="app_lock_method_pattern">3×3 pattern</string>
-  <string name="app_lock_method_pattern_desc">Connect at least 4 dots on a 3×3 grid</string>
-  <string name="app_lock_pattern_unlock_title">Draw your pattern to unlock</string>
-  <string name="app_lock_pattern_setup_title">Draw a pattern</string>
-  <string name="app_lock_pattern_confirm_title">Draw it again</string>
-  <string name="app_lock_pattern_setup_hint">Connect at least 4 dots</string>
-  <string name="app_lock_pattern_confirm_hint">Draw the same pattern again</string>
-  <string name="app_lock_pattern_too_short">Connect at least 4 dots</string>
-  <string name="app_lock_pattern_mismatch">Patterns don\'t match. Start over</string>
-  <string name="app_lock_wrong_pattern">Incorrect pattern</string>
-  <string name="app_lock_change_pattern">Change pattern</string>
-  <string name="app_lock_auto_unlock_title">Auto-unlock when correct</string>
-  <string name="app_lock_auto_unlock_summary">Unlocks as soon as the PIN matches — no confirm key. Patterns always verify when you let go.</string>
-  <string name="app_lock_auto_unlock_hint">Auto-unlock is on — unlocks as soon as it matches</string>
-  <string name="app_lock_auto_unlock_badge">auto-unlock</string>
-  <string name="app_lock_summary_on_format">On · %1$s</string>
 
 
   <!-- 外观深度定制 -->

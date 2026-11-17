@@ -397,15 +397,12 @@ fun EmbyFavoritesScreen(onBackToServers: (() -> Unit)? = null) {
     gridState = gridState,
   )
 
-  // ── 触底自动续拉 ──
-  // 预取距离跟随「预测性懒加载」开关；演员等 tab 不分页，只在 MOVIE 生效。
+  // 贴近末尾时自动续拉；演员等 tab 不分页，只在 MOVIE 生效。
   val reachBottomServer = server
   val gridSource = gridState.pagingSource()
-  val prefetchDistance = rememberPredictivePreloadDistance(browserPreferences)
   activeMoviePage.AutoLoadMore(
     source = gridSource,
     enabled = server != null && tab == FavoriteTab.MOVIE,
-    distance = prefetchDistance,
     loader = { s, l -> activeMoviePageLoader(server!!)(s, l) },
   )
 

@@ -606,10 +606,7 @@ class EmbyRepository(
   suspend fun getPersonFavoriteState(server: EmbyServer, personId: String): Boolean? =
     withContext(Dispatchers.IO) { EmbyClient.getPersonFavoriteState(sessionServer(server), personId) }
 
-  /**
-   * 随机播放：返回 [limit] 个随机项。可指定 [includeItemTypes]
-   * 例如 listOf("Movie") / listOf("Episode")。
-   */
+  /** Samples recommendation candidates without launching or shuffling a playback queue. */
   suspend fun getRandomItems(
     server: EmbyServer,
     parentId: String? = null,
@@ -620,10 +617,7 @@ class EmbyRepository(
     EmbyClient.getRandomItems(sessionServer(server), parentId, includeItemTypes, limit, isFavorite)
   }
 
-  // ─── 相似推荐 / 即混 / 续播 ───
-  // 服务端算法那三套（`/Items/{Id}/Similar` / `/Items/{Id}/InstantMix` / `/Shows/NextUp`）
-  // 与本地算法（`LocalSimilarity`）由 `SimilarAlgorithm` 偏好二选一，
-  // 详见 `EmbyClient` 2.5 节的说明。
+  // ─── 服务端相似推荐 / 即混 / 续播 ───
 
   /** 相似推荐（服务端算法）。返回的是分页壳，用 [EmbyItemsResult.Items] 取。 */
   suspend fun getSimilarItems(

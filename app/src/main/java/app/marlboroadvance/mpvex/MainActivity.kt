@@ -95,7 +95,6 @@ import app.marlboroadvance.mpvex.ui.browser.MainScreen
 import app.marlboroadvance.mpvex.ui.cine.CineRoute
 import app.marlboroadvance.mpvex.ui.cine.LocalUiStyle
 import app.marlboroadvance.mpvex.ui.cine.UiStyle
-import app.marlboroadvance.mpvex.ui.lock.AppLockGate
 import app.marlboroadvance.mpvex.ui.postgres.PostgresSetupForm
 import app.marlboroadvance.mpvex.ui.postgres.PostgresSetupViewModel
 import app.marlboroadvance.mpvex.ui.theme.DarkMode
@@ -228,44 +227,42 @@ class MainActivity : ComponentActivity() {
           // 启动动画只覆盖当前关卡；数据库验证前不组合首页，避免闪现或提前加载。
           var showSplash by remember { mutableStateOf(true) }
 
-          AppLockGate {
-            val postgresViewModel: PostgresSetupViewModel = viewModel(
-              viewModelStoreOwner = this@MainActivity,
-              key = "postgres-startup-gate",
-              factory = viewModelFactory {
-                initializer {
-                  PostgresSetupViewModel(postgresConfigStorage, postgresConnectionChecker)
-                }
-              },
-            )
-            val postgresState by postgresViewModel.uiState.collectAsState()
+          val postgresViewModel: PostgresSetupViewModel = viewModel(
+            viewModelStoreOwner = this@MainActivity,
+            key = "postgres-startup-gate",
+            factory = viewModelFactory {
+              initializer {
+                PostgresSetupViewModel(postgresConfigStorage, postgresConnectionChecker)
+              }
+            },
+          )
+          val postgresState by postgresViewModel.uiState.collectAsState()
 
-            Box(modifier = Modifier.fillMaxSize()) {
-              if (postgresState.passed) {
-                DisposableEffect(Unit) {
-                  val processLifecycle = ProcessLifecycleOwner.get().lifecycle
-                  val observer = LifecycleEventObserver { _, event ->
-                    when (event) {
-                      Lifecycle.Event.ON_START -> embyServerRepository.setForeground(true)
-                      Lifecycle.Event.ON_STOP -> embyServerRepository.setForeground(false)
-                      else -> Unit
-                    }
-                  }
-                  processLifecycle.addObserver(observer)
-                  embyServerRepository.setForeground(processLifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))
-                  onDispose {
-                    processLifecycle.removeObserver(observer)
-                    embyServerRepository.setForeground(false)
+          Box(modifier = Modifier.fillMaxSize()) {
+            if (postgresState.passed) {
+              DisposableEffect(Unit) {
+                val processLifecycle = ProcessLifecycleOwner.get().lifecycle
+                val observer = LifecycleEventObserver { _, event ->
+                  when (event) {
+                    Lifecycle.Event.ON_START -> embyServerRepository.setForeground(true)
+                    Lifecycle.Event.ON_STOP -> embyServerRepository.setForeground(false)
+                    else -> Unit
                   }
                 }
-                Navigator()
-              } else {
-                PostgresSetupForm(postgresViewModel, onSuccess = {})
+                processLifecycle.addObserver(observer)
+                embyServerRepository.setForeground(processLifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))
+                onDispose {
+                  processLifecycle.removeObserver(observer)
+                  embyServerRepository.setForeground(false)
+                }
               }
+              Navigator()
+            } else {
+              PostgresSetupForm(postgresViewModel, onSuccess = {})
+            }
 
-              if (showSplash) {
-                AppSplashScreen(onFinished = { showSplash = false })
-              }
+            if (showSplash) {
+              AppSplashScreen(onFinished = { showSplash = false })
             }
           }
         }

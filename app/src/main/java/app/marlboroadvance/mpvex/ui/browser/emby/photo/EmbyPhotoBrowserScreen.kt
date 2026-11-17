@@ -45,10 +45,9 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.marlboroadvance.mpvex.domain.emby.EmbyItem
 import app.marlboroadvance.mpvex.preferences.BrowserPreferences
-import app.marlboroadvance.mpvex.preferences.preference.collectAsState
 import app.marlboroadvance.mpvex.presentation.Screen
 import app.marlboroadvance.mpvex.ui.browser.emby.EmbyViewModel
-import app.marlboroadvance.mpvex.ui.browser.emby.rememberPredictivePreloadDistance
+import app.marlboroadvance.mpvex.ui.browser.emby.PagedList
 import app.marlboroadvance.mpvex.ui.browser.photo.PhotoViewerEntry
 import app.marlboroadvance.mpvex.ui.browser.photo.SharedPhotoViewer
 import app.marlboroadvance.mpvex.ui.browser.photo.formatPhotoFileSize
@@ -62,12 +61,12 @@ import org.koin.compose.koinInject
 
 /**
  * Read-only Emby photo browser. SharedPhotoViewer provides zoom, rotation,
- * immersive paging, slideshow and filmstrip. This screen loads images and
+ * immersive paging and manual slideshow. This screen loads images and
  * subsequent pages, remembers local viewing position, and shows photo metadata.
  */
 @Serializable
 data class EmbyPhotoBrowserScreen(
-  /** 初始队列快照（网格页当前列表 / 随机播放结果） */
+  /** 初始队列快照（网格页当前列表） */
   val initialPhotos: List<EmbyItem>,
   val initialIndex: Int,
   /** 库 Id 或相册 Id：续页按同一父级拉 */
@@ -94,15 +93,12 @@ data class EmbyPhotoBrowserScreen(
     var consumed by remember { mutableIntStateOf(initialConsumedCount) }
     var loadingMore by remember { mutableStateOf(false) }
 
-    // 幻灯片 / 沉浸 / 下拉关闭 / 胶片条 / 信息栏 / 顶栏的全屏与旋转钮
+    // 幻灯片 / 沉浸 / 下拉关闭 / 信息栏 / 顶栏的全屏与旋转钮
     // 全部在 [SharedPhotoViewer] 里，
     // 这一层保留只读图片信息、续页和取图 URL。
     var showInfo by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
     val currentPage = pagerState.currentPage
-
-    // 进页是否自播幻灯片：读全局开关（默认关）**一次**，之后改开关只影响新打开的浏览器
-    val autoPlaySlideshow = remember { browserPreferences.photoAutoSlideshow.get() }
 
     // 交给共享外壳的最小信息：稳定 key + 标题 + 附注（大小 · 日期）。
     // 附注是后来补的：信息栏现在两个入口都显示，Emby 这边不能留一行空白
@@ -177,28 +173,16 @@ data class EmbyPhotoBrowserScreen(
       }
     }
 
-    // 滑到距末尾 prefetchDistance 张以内续页（「预测性懒加载」开关：开 ≈ 一屏 / 关 ≈ 贴近末尾）
-    val prefetchDistance = rememberPredictivePreloadDistance(browserPreferences)
-    LaunchedEffect(currentPage, prefetchDistance) {
-      if (queue.isNotEmpty() && currentPage >= queue.size - prefetchDistance) loadMore()
+    // Load ordinary pages only near the end of the current queue.
+    LaunchedEffect(currentPage) {
+      if (queue.isNotEmpty() && currentPage >= queue.size - PagedList.PREFETCH_DISTANCE) loadMore()
     }
 
-    // ── 前后预加载（相邻 ±N 张）──
-    // N 走设置（1~3，默认 1）。提前把左右的图拉进 Coil 的缓存，滑过去时直接命中。
-    // 内存怎么兜的（用户问「会不会炸」）：
-    //   · 图片尺寸由 URL 里的 maxWidth=2048 限制，不会拿相机原图；
-    //   · Coil 的内存缓存按堆的 25% 封顶（见 EmbyPhotoImageLoader.MEMORY_PERCENT），
-    //     超了自动丢最旧的 —— 所以 N 调大只是「缓存更容易被后来者顶掉」，
-    //     不是无上限增长；N=3 时最多 6 张旁侧图，几十 MB，低内存机也不会崩。
-    // ⚠️ 仍坚持「用页面级 scope 发射，不在本 effect 里直接挂起下载」：
-    //    本 effect 的 key 含 currentPage，翻页会取消它；预取一旦被取消，
-    //    已经在途的那次下载会前功尽弃，恰好滑到那张就白一下。
-    val preloadCount by browserPreferences.photoPreloadCount.collectAsState()
-    val preload = preloadCount.coerceIn(1, MAX_PRELOAD)
-    LaunchedEffect(currentPage, server, preload) {
+    // Preload only the adjacent images at the same width as the visible page.
+    // Use the page scope so moving the pager does not cancel an in-flight image load.
+    LaunchedEffect(currentPage, server) {
       val current = server ?: return@LaunchedEffect
-      for (offset in -preload..preload) {
-        if (offset == 0) continue
+      for (offset in listOf(-1, 1)) {
         val item = queue.getOrNull(currentPage + offset) ?: continue
         scope.launch {
           withContext(Dispatchers.IO) {
@@ -222,7 +206,6 @@ data class EmbyPhotoBrowserScreen(
       entries = entries,
       pagerState = pagerState,
       title = title,
-      autoPlaySlideshow = autoPlaySlideshow,
       rotation = rotation,
       onBack = { backStack.removeLastOrNull() },
       topBarActions = { _ ->
@@ -269,20 +252,6 @@ data class EmbyPhotoBrowserScreen(
             zoomRegistry = zoomRegistry,
             // 回填加载状态：图没出来之前幻灯片不倒数（见 PhotoLoadRegistry）
             loadRegistry = loadRegistry,
-          )
-        }
-      },
-      renderThumbnail = { index, modifier ->
-        val item = queue.getOrNull(index)
-        if (item != null) {
-          EmbyPhotoThumbnail(
-            server = server,
-            url = server?.let { vm.photoImageUrl(it, item, maxWidth = FILMSTRIP_WIDTH) },
-            fallbackUrl = server?.let {
-              vm.photoImageUrl(it, item, maxWidth = FILMSTRIP_WIDTH, format = "jpg")
-            },
-            contentDescription = item.Name,
-            modifier = modifier,
           )
         }
       },
@@ -352,14 +321,8 @@ data class EmbyPhotoBrowserScreen(
     /** 浏览器续页每页条数。比网格页小：全屏大图更占内存，一页少点翻得更顺 */
     const val PAGE_SIZE = 40
 
-    /** 预加载张数的上限（与设置页那 1/2/3 三档一致） */
-    const val MAX_PRELOAD = 3
-
     /** 全屏图的取图宽度。与预取用同一个值，缓存键才对得上 */
     const val PHOTO_MAX_WIDTH = 2048
-
-    /** 胶片条缩略图的取图宽度。小图而已，别按全屏图的尺寸拉——那是几十倍的流量 */
-    const val FILMSTRIP_WIDTH = 240
   }
 }
 

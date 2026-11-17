@@ -61,7 +61,6 @@ import app.marlboroadvance.mpvex.domain.emby.EmbyItemPolicy
 import app.marlboroadvance.mpvex.domain.emby.EmbyServer
 import app.marlboroadvance.mpvex.domain.emby.EmbyTicks
 import app.marlboroadvance.mpvex.domain.emby.displayTitle
-import app.marlboroadvance.mpvex.preferences.BrowserPreferences
 import app.marlboroadvance.mpvex.ui.browser.emby.AutoLoadMore
 import app.marlboroadvance.mpvex.ui.browser.emby.EmbyBrowseCache
 import app.marlboroadvance.mpvex.ui.browser.emby.EmbyDetailCache
@@ -73,12 +72,10 @@ import app.marlboroadvance.mpvex.ui.browser.emby.PagedList
 import app.marlboroadvance.mpvex.ui.browser.emby.PagedResult
 import app.marlboroadvance.mpvex.ui.browser.emby.pagingSource
 import app.marlboroadvance.mpvex.ui.browser.emby.rememberDetailPage
-import app.marlboroadvance.mpvex.ui.browser.emby.rememberPredictivePreloadDistance
 import app.marlboroadvance.mpvex.ui.utils.LocalBackStack
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import org.koin.compose.koinInject
 
 /** 季页的两种密度共用同一分页状态，切换不触发请求或改变播放队列。 */
 @Composable
@@ -92,8 +89,6 @@ internal fun EmbySeasonDetailContent(
   showBackButton: Boolean = true,
 ) {
   val scope = rememberCoroutineScope()
-  val prefs = koinInject<BrowserPreferences>()
-  val distance = rememberPredictivePreloadDistance(prefs)
   val seasonId = requireNotNull(season.Id)
   var series by remember(seasonId, server) {
     mutableStateOf(
@@ -154,7 +149,6 @@ internal fun EmbySeasonDetailContent(
   page.AutoLoadMore(
     source = gridState.pagingSource(),
     enabled = series != null && !page.loading && !seriesLoading && page.error == null,
-    distance = distance,
     loader = loader,
   )
 

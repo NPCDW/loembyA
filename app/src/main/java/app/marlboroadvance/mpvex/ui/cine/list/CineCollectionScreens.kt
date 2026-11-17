@@ -52,7 +52,6 @@ import app.marlboroadvance.mpvex.R
 import app.marlboroadvance.mpvex.domain.emby.EmbyClient
 import app.marlboroadvance.mpvex.domain.emby.EmbyItem
 import app.marlboroadvance.mpvex.domain.emby.EmbyServer
-import app.marlboroadvance.mpvex.preferences.BrowserPreferences
 import app.marlboroadvance.mpvex.ui.browser.LocalNavigationBarHeight
 import app.marlboroadvance.mpvex.ui.browser.emby.AutoLoadMore
 import app.marlboroadvance.mpvex.ui.browser.emby.EmbyDetailScreen
@@ -65,7 +64,6 @@ import app.marlboroadvance.mpvex.ui.browser.emby.PagedResult
 import app.marlboroadvance.mpvex.ui.browser.emby.components.EmbyImage
 import app.marlboroadvance.mpvex.ui.browser.emby.pagingSource
 import app.marlboroadvance.mpvex.ui.browser.emby.rememberBrowsePage
-import app.marlboroadvance.mpvex.ui.browser.emby.rememberPredictivePreloadDistance
 import app.marlboroadvance.mpvex.ui.cine.CineTheme
 import app.marlboroadvance.mpvex.ui.cine.components.CineFilterChip
 import app.marlboroadvance.mpvex.ui.cine.components.CineGlassTopBar
@@ -78,7 +76,6 @@ import app.marlboroadvance.mpvex.ui.cine.rememberCineWide
 import app.marlboroadvance.mpvex.ui.cine.toCineMedia
 import app.marlboroadvance.mpvex.ui.utils.LocalBackStack
 import kotlinx.coroutines.launch
-import org.koin.compose.koinInject
 
 /**
  * Cine 收藏页（M3）。
@@ -100,7 +97,6 @@ fun CineFavoritesScreen(modifier: Modifier = Modifier, onBackToServers: (() -> U
   val server by viewModel.currentServer.collectAsState()
   CompositionLocalProvider(LocalEmbyImageServer provides server) {
   val backStack = LocalBackStack.current
-  val prefs = koinInject<BrowserPreferences>()
 
   val wide = rememberCineWide()
   val space = CineTheme.space
@@ -118,7 +114,6 @@ fun CineFavoritesScreen(modifier: Modifier = Modifier, onBackToServers: (() -> U
   val page = server?.let { rememberBrowsePage(it, "cine-favorites-v2:${mediaFilter.name}") }
     ?: remember { PagedList<EmbyItem>(keyOf = { it.Id ?: it.Name ?: "" }) }
   val gridState = rememberLazyGridState()
-  val preloadDistance = rememberPredictivePreloadDistance(prefs)
 
   val queryFilter = mediaFilter
   suspend fun loadPage(startIndex: Int, limit: Int): PagedResult<EmbyItem>? {
@@ -151,7 +146,6 @@ fun CineFavoritesScreen(modifier: Modifier = Modifier, onBackToServers: (() -> U
   page.AutoLoadMore(
     source = gridState.pagingSource(),
     enabled = tab == 0,
-    distance = preloadDistance,
     loader = ::loadPage,
   )
 

@@ -26,6 +26,12 @@ object LoembyMediaSelection {
       }
     }
     if (spec.selectPolicy == "manual" && spec.versionSelect in 1..sources.size) return spec.versionSelect - 1
+    return selectAutomaticSourceIndex(sources, autoPolicy)
+  }
+
+  /** Shared automatic policy for playback and detail/progress presentation; response ties remain stable. */
+  fun selectAutomaticSourceIndex(sources: List<EmbyMediaSource>, autoPolicy: String = "high-resolution"): Int {
+    require(sources.isNotEmpty()) { "Emby Playback Info Error: 没有可用的媒体源" }
     // Rust's stable sort keeps response order for equal ranks and unknown policies.
     return when (autoPolicy) {
       "high-bitrate" -> sources.indices.sortedWith(compareByDescending<Int> { sources[it].Size ?: 0 }).first()

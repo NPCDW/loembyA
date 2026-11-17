@@ -24,7 +24,7 @@ data class PlaybackSpec(
   val primaryImageTag: String? = null,
   val backdropImageTag: String? = null,
   val positionTicks: Long = 0,
-  val useDirectLink: Boolean = true,
+  val useDirectLink: Boolean = false,
   val selectPolicy: String = "auto",
   val versionSelect: Int = 1,
   val videoSelect: Int = 0,

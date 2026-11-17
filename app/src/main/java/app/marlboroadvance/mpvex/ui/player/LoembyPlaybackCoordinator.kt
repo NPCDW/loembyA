@@ -158,6 +158,7 @@ class LoembyPlaybackCoordinator internal constructor(
       val session = Session(++generation, owner, transport, callbacks, LoembyPlaybackState(url, spec))
       session.precedingSettlement = previous?.settlement ?: lastSettlement
       current = session
+      transport.setString("cache-on-disk", "no")
       if (spec.detailOrigin == null || mutableLoaded.value?.detailOrigin !== spec.detailOrigin) mutableLoaded.value = null
       backend.volume()?.let { transport.setDouble("volume", it) }
       publish(session)
@@ -423,6 +424,7 @@ class LoembyPlaybackCoordinator internal constructor(
 
   private fun configureCache(session: Session, resolved: ResolvedPlayback) {
     if (!owns(session)) return
+    session.transport.setString("cache-on-disk", "no")
     val bitrate = resolved.source.Bitrate
     val forwardBytes = resolved.config.cache.forward.bytesFor(bitrate)
     val backwardBytes = resolved.config.cache.backward.bytesFor(bitrate)

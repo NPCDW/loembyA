@@ -31,6 +31,24 @@ class LoembyMediaSelectionTest {
     assertEquals(1, LoembyMediaSelection.selectSourceIndex(listOf(source("4k", 10), source("2160p", 20)), spec))
   }
 
+  @Test fun automaticPolicyHelperMatchesPlaybackAndStableTies() {
+    val sources = listOf(source("720p", 10), source("4k", 20), source("2160p", 20), source("1080p", 30))
+    for (policy in listOf("high-resolution", "high-bitrate", "unknown")) {
+      assertEquals(
+        LoembyMediaSelection.selectSourceIndex(sources, spec, autoPolicy = policy),
+        LoembyMediaSelection.selectAutomaticSourceIndex(sources, policy),
+      )
+    }
+    assertEquals(1, LoembyMediaSelection.selectAutomaticSourceIndex(sources, "high-resolution"))
+    assertEquals(3, LoembyMediaSelection.selectAutomaticSourceIndex(sources, "high-bitrate"))
+    assertEquals(0, LoembyMediaSelection.selectAutomaticSourceIndex(sources, "unknown"))
+  }
+
+  @Test(expected = IllegalArgumentException::class)
+  fun automaticPolicyRejectsEmptySources() {
+    LoembyMediaSelection.selectAutomaticSourceIndex(emptyList())
+  }
+
   @Test fun explicitRouteManualAndAutomaticSelectionBranches() {
     val sources = listOf(source(size = 10).copy(Id = "a"), source(size = 20).copy(Id = "b"))
     assertEquals(1, LoembyMediaSelection.selectSourceIndex(sources, spec, 2))

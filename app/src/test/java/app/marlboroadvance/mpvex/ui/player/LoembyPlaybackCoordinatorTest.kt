@@ -67,12 +67,15 @@ class LoembyPlaybackCoordinatorTest {
     assertEquals((200L * 1024 * 1024).toString(), mpv.strings["demuxer-max-back-bytes"])
     assertEquals("1000000", mpv.strings["cache-secs"])
     assertEquals("1000000", mpv.strings["demuxer-readahead-secs"])
+    assertEquals("no", mpv.strings["cache-on-disk"])
+    mpv.strings["cache-on-disk"] = "yes"
     mpv.strings["cache-secs"] = "45"
     mpv.strings["demuxer-readahead-secs"] = "8"
     coordinator.fileLoaded(owner)
     runCurrent()
     assertEquals("1000000", mpv.strings["cache-secs"])
     assertEquals("1000000", mpv.strings["demuxer-readahead-secs"])
+    assertEquals("no", mpv.strings["cache-on-disk"])
     coordinator.finish("quit", owner)
     runCurrent()
   }
@@ -98,6 +101,7 @@ class LoembyPlaybackCoordinatorTest {
     assertEquals("20000000", mpv.strings["demuxer-max-back-bytes"])
     assertEquals("1000000", mpv.strings["cache-secs"])
     assertEquals("1000000", mpv.strings["demuxer-readahead-secs"])
+    assertEquals("no", mpv.strings["cache-on-disk"])
     coordinator.finish("quit", owner)
     runCurrent()
   }

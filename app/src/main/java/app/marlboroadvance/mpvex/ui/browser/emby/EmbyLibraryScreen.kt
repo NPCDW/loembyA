@@ -31,26 +31,19 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Casino
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.FilterAlt
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.GridView
-import androidx.compose.material.icons.filled.History
-import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SearchOff
-import androidx.compose.material.icons.filled.Shuffle
-import androidx.compose.material.icons.filled.ShuffleOn
 import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material.icons.outlined.FilterAlt
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
@@ -75,7 +68,6 @@ import androidx.compose.runtime.collectAsState
 import android.widget.Toast
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -85,7 +77,6 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
@@ -101,7 +92,6 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.ime
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
@@ -126,22 +116,13 @@ import app.marlboroadvance.mpvex.domain.emby.EmbyServer
 import app.marlboroadvance.mpvex.domain.emby.EmbyUserData
 import app.marlboroadvance.mpvex.domain.emby.displayTitle
 import app.marlboroadvance.mpvex.preferences.BrowserPreferences
-import app.marlboroadvance.mpvex.preferences.preference.Preference
 import app.marlboroadvance.mpvex.preferences.preference.collectAsState
-import app.marlboroadvance.mpvex.preferences.shouldResynthesizeCover
 import app.marlboroadvance.mpvex.presentation.Screen
 import app.marlboroadvance.mpvex.presentation.components.pullrefresh.PullRefreshGridBox
 import app.marlboroadvance.mpvex.ui.browser.emby.components.EmbyCardStyle
-import app.marlboroadvance.mpvex.ui.browser.emby.components.EmbyFavoriteRandomIcon
-import app.marlboroadvance.mpvex.ui.browser.emby.components.EmbyGachaDrawDialog
-import app.marlboroadvance.mpvex.ui.browser.emby.components.EmbyGachaStyle
-import app.marlboroadvance.mpvex.ui.browser.emby.components.GachaCard
 import app.marlboroadvance.mpvex.ui.browser.emby.components.EmbyImage
 import app.marlboroadvance.mpvex.ui.browser.emby.components.EmbyProgressBar
 import app.marlboroadvance.mpvex.ui.browser.emby.components.MEDIA_BADGE_BG
-import app.marlboroadvance.mpvex.ui.browser.emby.components.FOLDER_ICON_BLUE
-import app.marlboroadvance.mpvex.ui.browser.emby.components.LocalEmbyAppearance
-import app.marlboroadvance.mpvex.ui.browser.emby.components.VideoFeedIcon
 import app.marlboroadvance.mpvex.ui.browser.emby.components.EmbyMediaCard
 import app.marlboroadvance.mpvex.ui.browser.emby.components.EmbySearchFilter
 import app.marlboroadvance.mpvex.ui.browser.emby.components.EmbySearchFilterRow
@@ -154,22 +135,17 @@ import app.marlboroadvance.mpvex.ui.browser.emby.photo.EmbyPhotoBrowserScreen
 import app.marlboroadvance.mpvex.ui.browser.emby.photo.EmbyPhotoCard
 import app.marlboroadvance.mpvex.ui.browser.emby.photo.EmbyPhotoGridScreen
 import app.marlboroadvance.mpvex.ui.browser.emby.photo.photoSubtitle
-import app.marlboroadvance.mpvex.ui.player.feed.VerticalFeedActivity
-import app.marlboroadvance.mpvex.ui.player.feed.feedPlaybackItemOf
 import app.marlboroadvance.mpvex.ui.utils.LazyGridSideScrollbar
 import app.marlboroadvance.mpvex.ui.utils.LocalBackStack
 import app.marlboroadvance.mpvex.ui.utils.scrollToTop
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import org.koin.compose.koinInject
-import kotlin.math.roundToInt
 
 /**
  * Emby 媒体库浏览页（二级页面）。
@@ -177,7 +153,7 @@ import kotlin.math.roundToInt
  * 页面结构：
  * 1. 顶栏：返回 + 媒体库名称 + 搜索
  * 2. 分类行：全部 / 继续播放 / 合集 / 收藏 / 文件夹
- * 3. 工具行：媒体数量 + 随机播放 + 视图样式 + 排序
+ * 3. 工具行：媒体数量 + 筛选 + 视图样式 + 排序
  * 4. 媒体网格（海报 / 背景图 / 横幅三种样式）
  *
  * 层级导航：媒体库 → 影视剧详情 → 季详情 → 单集详情。
@@ -311,17 +287,6 @@ data class EmbyLibraryScreen(
     // 卡片右上角心形快捷收藏开关（默认开）。关掉后退回只读角标。
     // 搜索联想词列表是否收起（默认展开）。联想只是参考，用户收起后一直记着。
     val suggestCollapsed by browserPreferences.embySearchSuggestCollapsed.collectAsState()
-    // 文件夹宫格封面是否随机合成（默认开）。改它会换一套缓存键，来回切不会串图。
-    val folderRandomCover by browserPreferences.embyFolderRandomCover.collectAsState()
-    // 随机播放的三个入口：单击下钻 or 长按下钻（默认前者）。用户可反转这组分工。
-    val randomDrillDownOnTap by browserPreferences.embyRandomDrillDownOnTap.collectAsState()
-    // 手势提示（Toast）总开关：嫌吵的人可以关掉，只留「取不到内容」那种失败提示。
-    val randomGestureToast by browserPreferences.embyRandomGestureToast.collectAsState()
-    // 合成策略：多久才允许把拼好的宫格封面换一批（默认「每次进入都重新合成」＝旧行为）。
-    // 只影响「什么时候重取」，不影响取样方式（那是上面那个开关的事）。
-    val coverRefreshPolicy by browserPreferences.embyFolderCoverRefreshPolicy.collectAsState()
-    val coverRefreshHours by browserPreferences.embyFolderCoverRefreshHours.collectAsState()
-    val coverRefreshDays by browserPreferences.embyFolderCoverRefreshDays.collectAsState()
     // 联想词的「自动收起」标记：不是用户手动收的，而是程序按下面的判据自己收的。
     // 单独一个状态而不是直接写偏好 —— 自动行为不该污染用户的手动选择。
     var suggestAutoCollapsed by remember { mutableStateOf(false) }
@@ -614,19 +579,8 @@ data class EmbyLibraryScreen(
     // 长按选中的条目：非空时弹操作框（文件夹与媒体是两套菜单）
     var actionTarget by remember { mutableStateOf<EmbyItem?>(null) }
 
-    /**
-     * 「正在打开」整页加载层：随机播放、随机播放收藏、视界流与随机播放图片
-     * 在取数期间可能挂起数秒。显示反馈并阻止重复点击，避免同时启动多个播放入口。
-     * 使用全局 [AppLoadingIndicator]，遵循加载动画的样式与大小设置。
-     */
-    var randomLaunching by remember { mutableStateOf(false) }
-  /** 长按发生的位置（root 坐标）：菜单锚在这里展开，而不是屏幕中间 */
-  var menuAnchor by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
-
-    // 文件夹宫格封面：初值取自进程内缓存，从子页面返回时不会重新请求
-    val folderCovers = remember {
-      mutableStateMapOf<String, List<String>>().apply { putAll(EmbyFolderCoverCache.snapshot()) }
-    }
+    /** 长按发生的位置（root 坐标）：菜单锚在这里展开，而不是屏幕中间 */
+    var menuAnchor by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
 
     // 用缓存里的滚动位置初始化，返回时能停在原来那一屏
     val gridState = rememberLazyGridState(
@@ -1271,9 +1225,8 @@ data class EmbyLibraryScreen(
       }
     }
 
-    // 触底预取距离：「预测性懒加载」开关（开 ≈ 一屏 / 关 ≈ 贴近末尾），全 App 分页列表统一
-    val prefetchDistance = rememberPredictivePreloadDistance(browserPreferences)
-    LaunchedEffect(gridState, items.size, prefetchDistance) {
+    // 距离末尾 2 个条目时续页，不提前一整屏取数。
+    LaunchedEffect(gridState, items.size, consumedCount) {
       snapshotFlow { gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index }
         .collect { lastVisible ->
           // 客户端筛选走全量扫描，没有「下一页」可翻；扫描中也不要再触发普通分页。
@@ -1285,7 +1238,7 @@ data class EmbyLibraryScreen(
             (hasGenreTagFilter && serverSnapshot != null && !supportsGenreIdFilter(serverSnapshot.id))
           val canLoadMore = !isLoading && !isScanning && !scanningFilter && !isActorListMode &&
             !loadingMore && consumedCount < totalCount && lastVisible != null
-          if (canLoadMore && lastVisible >= items.size - prefetchDistance) {
+          if (canLoadMore && lastVisible >= items.size - 2) {
             load(reset = false)
           }
         }
@@ -1463,444 +1416,6 @@ data class EmbyLibraryScreen(
     }
 
     /**
-     * 「随机播放」的取数。**口径：随机 = 把当前屏幕上这批结果打乱。**
-     *
-     * 屏幕上已经有一整批结果时（搜索、或「中文字幕」的全库扫描）直接洗牌 ——
-     * 这批就是用户眼前看到的东西，洗它最符合直觉，也省得去赌服务端认不认
-     * `SearchTerm` + `SortBy=Random` 这个组合。
-     *
-     * 没搜索时屏幕上的只是「一页」（库内浏览是分页续拉的），洗一页等于把随机范围
-     * 缩到极小，所以那种情况仍然交给服务端从整个（已筛选的）库里按 `SortBy=Random` 抽。
-     *
-     * 改造前这里只传 `parentId + PLAYABLE_TYPES`，等于「整个库随机」：
-     * 搜了某个词、或筛了类型/标签/年份之后再点随机，放的还是全库内容，跟眼前这批对不上。
-     *
-     * [favoritesOnly] 对应「随机播放收藏」那个键：在同样的范围上再限定只看收藏。
-     */
-    suspend fun loadRandomForView(
-      current: EmbyServer,
-      favoritesOnly: Boolean = false,
-      /**
-       * 是否**下钻**（把子文件夹一起纳入随机范围）。
-       *
-       * true = 老的默认行为：`recursive = true`，从当前目录往下递归取；
-       * false = 只取当前这一层（长按入口用），目录里没有直接可播条目时自然为空。
-       */
-      drillDown: Boolean = true,
-      /**
-       * 覆盖「随机播放数量」这个设置项（null = 照设置取）。
-       *
-       * 「随机抽卡」要用它：卡面只展示一条，但**池子必须比一条大** —— 否则重抽大概率
-       * 又抽回同一部片子。抽卡入口传 [GACHA_POOL_SIZE]，客户端从这一批里挑一条。
-       */
-      limitOverride: Int? = null,
-    ): List<EmbyItem> {
-      // 搜索 / 「中文字幕」扫描：结果集已经整批在手上 → 直接洗牌
-      if (searchQuery.isNotBlank() || chineseSubsOnly) {
-        val pool = visibleItems.filter { !favoritesOnly || it.UserData?.IsFavorite == true }
-        // 优先只随机「能直接播」的条目；整批都是剧集 / 合集这类容器时才退回整批，
-        // 否则点下去会直接提示「没有可播放内容」
-        val playable = pool.filter { item -> PLAYABLE_TYPES.any { it == item.Type } }
-        return (playable.ifEmpty { pool })
-          .shuffled()
-          .take(limitOverride ?: browserPreferences.randomPlayCount.randomPlayLimit())
-      }
-
-      // 随机只能落在「能直接播」的条目上。当前分类若只含 Series / BoxSet / Folder
-      // 这类容器（剧集库、合集分类、文件夹分类），交集为空 → 退回「本库可播放条目」，
-      // 也就是改造前的老行为；其它筛选项仍然生效。
-      val playableOfView = (effectiveTypes ?: PLAYABLE_TYPES).filter { it in PLAYABLE_TYPES }
-      val randomTypes = playableOfView.takeIf { it.isNotEmpty() } ?: PLAYABLE_TYPES
-
-      // 随机播放 / 视界流 / 抽卡取多少条：设置项与调用方覆盖，前者优先
-      val randomLimit = limitOverride ?: browserPreferences.randomPlayCount.randomPlayLimit()
-
-      return viewModel.loadItems(
-        server = current,
-        parentId = libraryId,
-        includeItemTypes = randomTypes,
-        filters = effectiveFilters,
-        sortBy = "Random",
-        sortOrder = "Ascending",
-        startIndex = 0,
-        limit = randomLimit,
-        // 是否递归到子文件夹由调用方决定：默认下钻（老行为），长按入口只取当前层
-        recursive = drillDown,
-        excludeItemTypes = effectiveExclude,
-        // 随机只落在能播的条目上，所以这里固定按视频形态 + 非容器来取
-        mediaTypes = effectiveMediaTypes ?: listOf("Video"),
-        isFolder = false,
-        // genres / tags 不传服务端（会 500），下面拿回来按 Genres / Tags 本地过滤。
-        genres = null,
-        tags = null,
-        years = selectedYears.toList().takeIf { it.isNotEmpty() },
-        officialRatings = selectedRatings.toList().takeIf { it.isNotEmpty() },
-        minCommunityRating = minRating,
-        isFavorite = if (favoritesOnly || favoriteOnly) true else null,
-        personIds = selectedPersonIds.toList().takeIf { it.isNotEmpty() },
-        isPlayed = playedFilter,
-        isHD = hdFilter,
-        is3D = threeDFilter,
-        hasSubtitles = subtitlesFilter,
-        studioIds = selectedStudioIds.toList().takeIf { it.isNotEmpty() },
-      ).items.filter { matchesGenreTagFilter(it) }
-    }
-
-    /**
-     * 随机播放 / 视界流启动前的一句提示：**只说这次是什么行为**。
-     *
-     * ⚠️ 不要在这里提「另一半手势」。上一版写「随机播放：含子文件夹 · 长按只播当前目录」，
-     * 用户单击后看到「长按」二字，第一反应是「提示写反了 / 我是不是按错了」——
-     * 这句提示的作用只是确认「这次取片范围」，不是在教手势。
-     * 手势分工的说明放在设置项的副标题里（那句是静态说明，不会被误读成动作回执）。
-     *
-     * 受 [randomGestureToast] 总开关控制；失败提示（[emptyCurrentLevelHint]）不受它控制。
-     */
-    fun showGestureHint(label: String, drillDown: Boolean) {
-      if (!randomGestureToast) return
-      val text = if (drillDown) "$label（含子文件夹）" else "$label（仅当前目录）"
-      android.widget.Toast
-        .makeText(context, text, android.widget.Toast.LENGTH_SHORT)
-        .show()
-    }
-
-    /**
-     * 「只播当前目录」取不到东西时的说明。
-     *
-     * 单说「没有可播放内容」在纯目录页上是半个假话 —— 内容就在子文件夹里，
-     * 只是这次没往下钻。把另一半手势直接写在提示里，用户不用去猜。
-     */
-    fun emptyCurrentLevelHint(): String {
-      val drillGesture = if (randomDrillDownOnTap) "单击" else "长按"
-      return "当前目录没有可直接播放的内容 · ${drillGesture}可含子文件夹"
-    }
-
-    /**
-     * 随机播放的统一入口：取一批、没取到就明确提示（以前是静默无反应）。
-     *
-     * @param drillDown true = 下钻（含子文件夹，默认单击）；false = 只播当前目录（长按）
-     */
-    fun startRandomPlayback(favoritesOnly: Boolean, drillDown: Boolean = true) {
-      // 取数期间已经在转圈了：再点一次没有意义，只会多打一轮网络请求
-      if (randomLaunching) return
-      randomLaunching = true
-      scope.launch {
-        try {
-        val current = viewModel.currentServerOrAwait() ?: return@launch
-        val random =
-          loadRandomForView(current, favoritesOnly = favoritesOnly, drillDown = drillDown)
-        if (random.isEmpty()) {
-          android.widget.Toast
-            .makeText(
-              context,
-              when {
-                favoritesOnly -> "当前范围内没有可随机播放的收藏"
-                drillDown -> "当前范围内没有可随机播放的内容"
-                else -> emptyCurrentLevelHint()
-              },
-              android.widget.Toast.LENGTH_SHORT,
-            )
-            .show()
-          return@launch
-        }
-        // 进播放器**之前**提示：这次到底是「含子文件夹」还是「只播当前目录」。
-        // 两种手势都弹 —— 用户反馈只给下钻弹、长按静悄悄，反而更像没生效。
-        showGestureHint(if (favoritesOnly) "随机播放收藏" else "随机播放", drillDown)
-        // 随机列表里可能混着看过的剧，切过去若恢复进度会直接跳到片尾，所以每个视频都从头放。
-        // 走 launchRandomPlayback 而不是 launchPlaylist：起播前会用硬预算替首条探一次直链，
-        // 否则 strm 条目会在服务端 probe 上干等（见该方法注释）。
-        viewModel.launchRandomPlayback(current, random)
-        } finally {
-          // 起播探测也在这一层里（launchRandomPlayback 是挂起的），所以转圈一直转到
-          // 播放器真要起来为止 —— 动画消失与画面切换是同一瞬间，中间不再有空窗期。
-          randomLaunching = false
-        }
-      }
-    }
-
-    // ── 随机抽卡：状态 ──
-    // gachaOpen   = 全屏揭晓层是否打开
-    // gachaCards  = 这一抽抽到的卡（**空列表 = 还在取数**，此时只播「准备中」的法阵）
-    // gachaRollId = 抽取次数，**动画重启只认它**：重抽有可能又抽回同一条，
-    //               以 item.Id 为 key 的话那次动画不会重播，看起来像点了没反应
-    val gachaDrawCountPref by browserPreferences.embyGachaDrawCount.collectAsState()
-    // 揭晓动画形态（经典翻牌 / 滚动揭晓）。只在单抽生效，见 EmbyGachaStyle 的说明。
-    val gachaStylePref by browserPreferences.embyGachaStyle.collectAsState()
-    var gachaOpen by remember { mutableStateOf(false) }
-    var gachaCards by remember { mutableStateOf<List<GachaCard>>(emptyList()) }
-    var gachaRollId by remember { mutableIntStateOf(0) }
-    var gachaRolling by remember { mutableStateOf(false) }
-    // 保留上一批抽卡结果，关闭揭晓层后仍可重新查看。
-    // ⚠️ 存的是**上一批**，不是当前这一批 —— 当前这一批就在 gachaCards 里，
-    //    再存一份只会让「上一批」在重抽的瞬间变成「这一批自己」。
-    //    重抽（rollId 自增）成功后才把它顶掉，仍能按 ← → 来回看。
-    var gachaPrevCards by remember { mutableStateOf<List<GachaCard>>(emptyList()) }
-    var gachaPrevRollId by remember { mutableIntStateOf(0) }
-    /**
-     * 滚动卡带的陪跑卡（单抽 + 选了滚动揭晓时才有值）。
-     *
-     * 不是额外请求：这一抽本来就是按 20 条取的池子（[GACHA_POOL_SIZE]），
-     * 以前只用掉 1 条、剩下 19 条直接丢掉；现在把剩下的接过来铺轮盘。
-     * 只带 `posterUrl` 就够 —— 轮盘上的卡只有封面，没有标题和简介。
-     */
-    var gachaReelCards by remember { mutableStateOf<List<GachaCard>>(emptyList()) }
-    // 「上一批」入口只在**抽完之后**才有意义：抽之前它是空的，点了只会弹个空法阵。
-    // 判据用「有没有上一批」而不是「有没有抽过」，省一个状态。
-    val gachaHasPrev = gachaPrevCards.isNotEmpty()
-
-    /**
-     * 抽一次：从**当前视图**的范围里随机取 [gachaDrawCountPref] 条视频，交给抽卡层去揭晓。
-     *
-     * 范围与「随机播放」完全同源（[loadRandomForView]）：分类档位、筛选、搜索词都照旧生效 ——
-     * 用户在「收藏」分类里点抽卡，抽到的就该是收藏里的片子，不能偷偷扩到整个库。
-     *
-     * @param excludeId 上一张卡上的条目，能避开就避开（只在**单抽**时用：多抽要的是
-     *                  「这一批里别重复」，跨批重复无所谓，强行排除反而会让池子变小）
-     */
-    fun rollGacha(excludeId: String? = null) {
-      // 取数期间连点没有意义：多打一次网络，还会把刚起的动画重启掉
-      if (gachaRolling) return
-      gachaRolling = true
-      // 立刻清空上一批卡 → 界面马上回到「法阵」态。重抽时若等网络回来才动，
-      // 那半秒到一秒的空窗看着就像「点了没反应」。
-      gachaCards = emptyList()
-      scope.launch {
-        try {
-          val current = viewModel.currentServerOrAwait()
-          if (current == null) {
-            android.widget.Toast
-              .makeText(context, "还没有连接到 Emby 服务器", android.widget.Toast.LENGTH_SHORT)
-              .show()
-            gachaOpen = false
-            return@launch
-          }
-          // 设置值在别处被手改过也可能越界，取数前再夹一次（与设置页同一口径）
-          val count = gachaDrawCountPref.coerceIn(1, GACHA_MAX_DRAW)
-          // 池子至少 20 条：单抽要能「重抽换片」，多抽更得留够余量（同批内先去重再取 N）
-          //
-          // ⚠️ `drillDown = true` 是硬性的，**不跟**「随机播放手势」那个设置
-          //    （`embyRandomDrillDownOnTap`）：抽卡是要「从这一片里抽点东西出来」，
-          //    只扫当前这一层的话，面对「每部片一个文件夹」的库会抽出来空的 ——
-          //    用户原话「抽卡可以抽到子文件夹的视频」。
-          val pool = loadRandomForView(
-            current,
-            drillDown = true,
-            limitOverride = maxOf(GACHA_POOL_SIZE, count),
-          )
-          val distinct = pool.filter { it.Id != null }.distinctBy { it.Id }
-          val picked = (
-            if (count == 1 && excludeId != null) {
-              distinct.filter { it.Id != excludeId }.ifEmpty { distinct }
-            } else {
-              distinct
-            }
-            )
-            .shuffled()
-            .take(count)
-          if (picked.isEmpty()) {
-            android.widget.Toast
-              .makeText(
-                context,
-                if (searchQuery.isNotBlank() || chineseSubsOnly) {
-                  "当前搜索结果里没有可抽取的视频"
-                } else {
-                  "当前范围内没有可抽取的视频"
-                },
-                android.widget.Toast.LENGTH_SHORT,
-              )
-              .show()
-            gachaOpen = false
-            return@launch
-          }
-          // ── 滚动卡带的陪跑卡 ──
-          // 只有「单抽 + 设置里选了轮盘」才需要。用刚取回来的池子直接铺，
-          // **不再打一次网络**：`distinct` 本来就有 20 条，被抽中的那条由弹窗
-          // 按 Id 剔掉后摆到轮盘最末位（见 slotStrip）。
-          // 其余情况一律清空 —— 留着 20 张卡的引用没有意义。
-          gachaReelCards = if (gachaStylePref == EmbyGachaStyle.SLOT && count == 1) {
-            distinct.take(GACHA_POOL_SIZE).map { item ->
-              GachaCard(
-                server = current,
-                item = item,
-                title = viewModel.displayTitle(item),
-                posterUrl = viewModel.imageUrl(current, item, "Primary", GACHA_POSTER_WIDTH),
-                backdropUrl = viewModel.imageUrl(current, item, "Backdrop", 960),
-              )
-            }
-          } else {
-            emptyList()
-          }
-          var cards = picked.map { item ->
-            GachaCard(
-              server = current,
-              item = item,
-              title = viewModel.displayTitle(item),
-              // 海报按实际显示尺寸向服务端请求：网格小卡 111~180dp 宽、
-              // 详情里的缩略图 96dp，480px 是纯浪费 —— Emby 的 `maxWidth` 就是
-              // 服务端缩放宽度，传小一档服务端直接给更小的图，省一半上下流量。
-              // 单抽大卡宽度封顶 380dp，480px 仍然够（密度 2x 时才勉强到 760，
-              // 但海报是 Crop 到卡面的，2x 屏上 480 已接近观感上限，不值得翻倍）。
-              posterUrl = viewModel.imageUrl(current, item, "Primary", GACHA_POSTER_WIDTH),
-              backdropUrl = viewModel.imageUrl(current, item, "Backdrop", 960),
-            )
-          }
-          // 单抽才预取简介：卡面就那么一张，多等一次 /Items 值得；
-          // 多抽的 N 条详情留到「点开某一张」时再补（10 条 = 10 次请求，不该在揭晓前打）。
-          if (cards.size == 1) {
-            val only = cards.first()
-            val full = only.item.Id
-              ?.let { id -> runCatching { viewModel.loadItemDetail(current, id) }.getOrNull() }
-            if (full != null) cards = listOf(only.copy(item = full))
-          }
-          // ⚠️ 顺序：先落 cards、再自增 rollId。反过来的话 LaunchedEffect 会带着旧数据
-          //    （甚至是空列表）重启，这一抽的动画就白跑了。
-          //    同理，「上一批」也必须在这一步就顶掉 —— 放在后面的话重抽的动画里
-          //    「上一批」还会指着本批自己。
-          if (gachaCards.isNotEmpty()) {
-            gachaPrevCards = gachaCards
-            gachaPrevRollId = gachaRollId
-          }
-          gachaCards = cards
-          gachaRollId++
-        } catch (e: CancellationException) {
-          throw e
-        } catch (e: Exception) {
-          android.widget.Toast
-            .makeText(context, "抽取失败：${e.message ?: "未知错误"}", android.widget.Toast.LENGTH_SHORT)
-            .show()
-          gachaOpen = false
-        } finally {
-          gachaRolling = false
-        }
-      }
-    }
-
-    /**
-     * 起播抽到的卡：1 张 = 「随机一张 / 长按某张」，N 张 = 「队列播放」。
-     *
-     * 三件事必须一起做：
-     *  · **先关抽卡层** —— 播放页会压在本页之上，卡面留在下面没有意义；
-     *  · **同一帧挂上「正在打开」遮罩** —— 防止重复点击，并覆盖播放器 Activity
-     *    真正启动前的短暂切换；
-     *  · **用可等待的起播**（[EmbyViewModel.launchRandomPlaybackAwait]）—— fire-and-forget
-     *    那版立刻返回，`finally` 当场就把遮罩撤了，空窗照样露出来。
-     *
-     * ⚠️ 多张时这是**替换**现有队列，不是追加：`launchRandomPlaybackAwait` 起的是一个
-     *    新播放列表。所以按钮文案写「队列播放」而不是「全部入队」—— 「入队」会让人
-     *    误以为追加到原有队列。
-     *    顺序就是揭晓顺序，这里不打乱。
-     */
-    fun playGachaCards(batch: List<GachaCard>) {
-      if (batch.isEmpty()) return
-      gachaOpen = false
-      if (randomLaunching) return
-      randomLaunching = true
-      scope.launch {
-        try {
-          val current = viewModel.currentServerOrAwait() ?: return@launch
-          viewModel.launchRandomPlaybackAwait(current, batch.map { it.item })
-        } finally {
-          randomLaunching = false
-        }
-      }
-    }
-
-    /**
-     * 「随机播放图片」：混合库「仅照片」档的随机入口。
-     *
-     * 与视频随机播放同构：递归取整个库的照片（相册层级拉平）、数量用同一个
-     * 「随机播放数量」设置、没取到就明确提示 —— 绝不静默无反应。
-     * 落点直接是全屏照片浏览器（不进视频播放器）。
-     */
-    fun startRandomPhotoPlayback() {
-      if (randomLaunching) return
-      randomLaunching = true
-      scope.launch {
-        try {
-        val current = viewModel.currentServerOrAwait() ?: return@launch
-        val randomPage = viewModel.loadPhotos(
-          server = current,
-          parentId = libraryId,
-          sortBy = "Random",
-          sortOrder = "Ascending",
-          startIndex = 0,
-          limit = browserPreferences.randomPlayCount.randomPlayLimit(),
-          recursive = true,
-        )
-        val random = randomPage.Items
-        if (random.isEmpty()) {
-          android.widget.Toast
-            .makeText(context, "当前范围内没有照片", android.widget.Toast.LENGTH_SHORT)
-            .show()
-          return@launch
-        }
-        backStack.add(
-          EmbyPhotoBrowserScreen(
-            initialPhotos = random,
-            initialConsumedCount = randomPage.consumedCount,
-            initialIndex = 0,
-            parentId = libraryId,
-            title = title,
-          ),
-        )
-        } finally {
-          // 照片浏览器是压栈（同一个 Activity），本页组合不会销毁 ⇒ 必须自己摘掉这层；
-          // 放在压栈之后，观感上是「转圈 → 直接换成照片」而不是先空一下再换。
-          randomLaunching = false
-        }
-      }
-    }
-
-    /**
-     * 「视界流」入口：从当前库随机抽一批，进仿抖音竖屏上下滑连播的页面。
-     *
-     * 随机取片和上面两个随机按钮走同一条路径（数量设置、容器类分类的兜底都共用），
-     * 差别只在最后一步：不是丢给主播放器排队播，而是把整批直连地址交给
-     * VerticalFeedActivity，让它自己管「滑到哪放哪」。
-     *
-     * @param drillDown true = 下钻（含子文件夹，默认单击）；false = 只取当前目录（长按）
-     */
-    fun startFeedPlayback(favoritesOnly: Boolean, drillDown: Boolean = true) {
-      if (randomLaunching) return
-      randomLaunching = true
-      scope.launch {
-        try {
-        val current = viewModel.currentServerOrAwait() ?: return@launch
-        val random =
-          loadRandomForView(current, favoritesOnly = favoritesOnly, drillDown = drillDown)
-        val items = random.mapNotNull { item ->
-          val id = item.Id ?: return@mapNotNull null
-          // 容器 / 编码元数据由 feedItemOf 一起带上：起播前据此预判该走哪个内核
-          feedPlaybackItemOf(
-            item = item,
-            title = viewModel.displayTitle(item),
-            streamUrl = { sourceId -> viewModel.getStreamUrl(current, id, mediaSourceId = sourceId) },
-          )
-        }
-        if (items.isEmpty()) {
-          android.widget.Toast
-            .makeText(
-              context,
-              when {
-                favoritesOnly -> "当前范围内没有可随机播放的收藏"
-                drillDown -> "当前范围内没有可随机播放的内容"
-                else -> emptyCurrentLevelHint()
-              },
-              android.widget.Toast.LENGTH_SHORT,
-            )
-            .show()
-          return@launch
-        }
-        // 与「随机播放」同一个意思：视界流同样要说明这次取片的范围（两种手势都弹）。
-        showGestureHint("视界流", drillDown)
-        VerticalFeedActivity.launch(context, items, libraryId, favoritesOnly, current.id, initialConsumedCount = random.size)
-        } finally {
-          randomLaunching = false
-        }
-      }
-    }
-
-    /**
      * 收掉输入法焦点。
      *
      * 进入搜索后焦点大概率还留在输入框上，此时点工具行上的任何按钮（排序 / 筛选 / 样式 …）
@@ -1963,44 +1478,6 @@ data class EmbyLibraryScreen(
           }
         },
         actions = {
-          // 「随机抽卡」挂在搜索键**左边**：抽卡是「看点什么」，搜索是「找一个」，
-          // 浏览场景下先抽后搜更顺；两个都是「在当前库上做动作」，并排放在顶栏也合理。
-          //
-          // 三种页面不给这个键：搜索态（顶栏此时是「退出搜索」，再塞一个入口会挤）、
-          // 演员列表与「某演员作品」子页（这两页没有可播放的视频语义，
-          // 与工具行收掉随机播放按钮的判据保持一致）。
-          if (!searchActive && !isActorListMode && personId == null) {
-            IconButton(onClick = {
-              releaseInputFocus()
-              // 先清掉上一批卡：取数期间只该看到法阵，不能让人瞥见上次的结果
-              gachaCards = emptyList()
-              gachaOpen = true
-              rollGacha()
-            }) {
-              Icon(Icons.Default.Casino, contentDescription = "随机抽卡")
-            }
-            // 「上一批」入口用于重新查看已关闭的抽卡结果。
-            // 只抽过、且现在没有正在抽的时候才出现 —— 平时不占顶栏的位置。
-            // 图标用 History：它表达的是「翻回刚才那次结果」，不是「再来一次」
-            // （再来一次已经是抽卡键自己）。
-            if (gachaHasPrev && !gachaRolling) {
-              IconButton(onClick = {
-                releaseInputFocus()
-                val prev = gachaPrevCards
-                if (prev.isEmpty()) return@IconButton
-                gachaCards = prev
-                // ⚠️ rollId 必须换成**那一批自己的**：沿用当前值的话上次动画的
-                //    LaunchedEffect 因为 key 没变而不会重播，画面会停在上一批的终态
-                //    （或者更糟 —— 直接闪成空法阵）。
-                gachaRollId = gachaPrevRollId
-                // 开回来时不再和当前批互换：来回翻会让 gachaPrevRollId 与
-                // gachaRollId 变成同一批，越翻越乱。要看下一批就再抽一次。
-                gachaOpen = true
-              }) {
-                Icon(Icons.Default.History, contentDescription = "上一批抽取结果")
-              }
-            }
-          }
           // 图标跟着搜索态走：没搜时是放大镜，进搜索后换成「放大镜 + 斜杠」。
           // 图标一直不变的话，用户进了搜索界面就找不到退出来的入口 ——
           // 同一个位置既是「进入」又是「退出」，长得却一模一样。
@@ -2058,23 +1535,10 @@ data class EmbyLibraryScreen(
         )
       }
 
-      // ── 3. 工具行：数量 + 随机播放 + 视图 + 排序 ──
-      // 演员列表与「某演员作品」子页都不可随机播放，也没有样式 / 排序 / 再筛选可言，
-      // 这些按钮留着只会让人点了没反应 —— 收掉，只保留左边的数量
+      // ── 3. 工具行：数量 + 筛选 + 视图 + 排序 ──
+      // 演员列表与「某演员作品」子页只保留左边的数量。
       val hideToolbarButtons = isActorListMode || personId != null
-      // 工具行给哪几个按钮，由**这一页实际装了什么**决定（不再由用户手选档位决定）：
-      //  · 有照片 ⇒ 给「随机播放图片」
-      //  · 有非容器的可播放条目、**或者有子文件夹** ⇒ 给视频那套（随机播放 / 收藏随机 /
-      //    视界流 / 筛选 / 视图）
-      //  · 首屏还没加载出来 ⇒ 按「两种都给」处理，避免工具行先空一排、内容到了再跳出来
-      // ⚠️ 「有子文件夹」必须算进来：随机播放 / 视界流默认**下钻**，纯目录页也是有效入口。
-      //    以前只数 `!isFolderLike` 的条目，纯子文件夹目录（0 个直接媒体）会把整组按钮收掉，
-      //    用户看到的就是「工具栏突然少了一半」。
-      val pagePhotoCount = items.count { it.Type == "Photo" }
-      val pagePlayableCount = items.count { it.Type != "Photo" && !isFolderLike(it) }
-      val pageFolderCount = items.count { isFolderLike(it) }
-      val showPhotoRandom = pagePhotoCount > 0
-      val showVideoActions = pagePlayableCount > 0 || pageFolderCount > 0 || items.isEmpty()
+      val showVideoActions = items.isEmpty() || items.any { it.Type != "Photo" || isFolderLike(it) }
       Row(
         modifier = Modifier
           .fillMaxWidth()
@@ -2119,54 +1583,7 @@ data class EmbyLibraryScreen(
         )
 
         if (!hideToolbarButtons) {
-          // 随机播放 / 收藏随机 / 视界流 / 筛选都是**视频语义**：这一页没有任何可播放
-          // 条目（纯照片页 / 纯目录页）时它们点了只会把人带进视频播放器或空结果，收掉。
           if (showVideoActions) {
-            // 三个随机入口共用一组手势：**单击下钻、长按只播当前目录**（默认），
-            // 用户可在设置里把两者调反（[randomDrillDownOnTap]）。
-            // 纯目录页（只有子文件夹）也能用 —— 下钻那一下会往里递归着随机。
-            ToolbarIconAction(
-              icon = Icons.Default.Shuffle,
-              contentDescription = "随机播放",
-              onClick = {
-                releaseInputFocus()
-                startRandomPlayback(favoritesOnly = false, drillDown = randomDrillDownOnTap)
-              },
-              onLongClick = {
-                releaseInputFocus()
-                startRandomPlayback(favoritesOnly = false, drillDown = !randomDrillDownOnTap)
-              },
-            )
-            // 同上，只是范围再限定「已收藏」：避免随机到没看过的
-            ToolbarIconAction(
-              // 区别于上面的「随机播放」：用它自己的 Emby 收藏随机图标，
-              // 原先用的 ShuffleOn 只比 Shuffle 多一条下划线，并排根本分不出来
-              icon = EmbyFavoriteRandomIcon,
-              contentDescription = "随机播放收藏",
-              onClick = {
-                releaseInputFocus()
-                startRandomPlayback(favoritesOnly = true, drillDown = randomDrillDownOnTap)
-              },
-              onLongClick = {
-                releaseInputFocus()
-                startRandomPlayback(favoritesOnly = true, drillDown = !randomDrillDownOnTap)
-              },
-            )
-            // 视界流：随机一批进仿抖音竖屏上下滑连播页。
-            // 图标刻意不用「随机」语义 —— 前两个按钮已经把那层意思占满了，
-            // 第三个得靠形状本身说话，否则一排三个图标看着像三个一样的按钮。
-            ToolbarIconAction(
-              icon = VideoFeedIcon,
-              contentDescription = "视界流",
-              onClick = {
-                releaseInputFocus()
-                startFeedPlayback(favoritesOnly = false, drillDown = randomDrillDownOnTap)
-              },
-              onLongClick = {
-                releaseInputFocus()
-                startFeedPlayback(favoritesOnly = false, drillDown = !randomDrillDownOnTap)
-              },
-            )
             // 筛选：有生效条件时图标高亮，让人一眼看出列表不是全量
             IconButton(onClick = { releaseInputFocus(); showFilterDialog = true }) {
               Icon(
@@ -2180,15 +1597,7 @@ data class EmbyLibraryScreen(
               )
             }
           }
-          // 有照片就给「随机播放图片」（递归取整个范围的照片，落全屏照片浏览器）。
-          // 混合页两个入口并存是有意的：随机看照片和随便挑个视频看，是两件事。
-          if (showPhotoRandom) {
-            IconButton(onClick = { releaseInputFocus(); startRandomPhotoPlayback() }) {
-              Icon(Icons.Default.Image, contentDescription = "随机播放图片")
-            }
-          }
-          // 视图样式（海报 / 横版 / 紧凑）：照片卡是**统一等比**的，跟着切样式会把它
-          // 压成海报比例或拉成一行一条 —— 这一页有照片时收掉，保住照片的版式。
+          // 纯照片页不切视频卡样式，保留照片的等比版式。
           if (showVideoActions) {
             IconButton(onClick = { releaseInputFocus(); showStyleDialog = true }) {
               Icon(Icons.Default.GridView, contentDescription = "视图样式")
@@ -2357,118 +1766,9 @@ data class EmbyLibraryScreen(
 
       // ── 4. 媒体网格 ──
       // 用下拉刷新包裹：返回页面不会自动刷新，只有用户主动下拉才重新拉取
-      // ── 文件夹宫格封面：一次批量取，别让每个文件夹各发一次请求 ──
-      // 容器条目自身没有封面，只能拿内部子项的缩略图拼。为了给服务端减压，这里对**当前父节点**
-      // 发**一次** Recursive 查询、按子项 ParentId 分组（见 `EmbyViewModel.loadFolderCoverBatch`），
-      // 一次覆盖这一屏所有文件夹。请求数从「每个文件夹一次」降到「每屏一次」。
-      // 批量没覆盖到的（子项都没图、或排在扫描窗口之外）才由卡片自己补一次单文件夹请求
-      // —— 见 `EmbyLibraryMediaCell` 里的 `folderCoverBatchReady` 守卫。
-      val mosaicFolderIds = remember(displayItems, folderRandomCover) {
-        displayItems.asSequence()
-          // ⚠️ 与卡片（EmbyLibraryMediaCell）共用同一个判定函数：两处各写一份内联判定，
-          //    一旦漂移就会出现「进了批量预取但卡片不认」的半套行为。
-          .filter { needsFolderMosaic(it) }
-          .mapNotNull { it.Id }
-          .distinct()
-          .toList()
-      }
-      // 「批量已经覆盖到哪一版文件夹集合」—— 用**签名比对**而不是布尔标志：
-      // 布尔标志在「列表刚加载出来」那一帧会被卡片读到旧的 true，卡片就抢在批量之前
-      // 自己把请求发了，于是变成「批量 + 每个文件夹」双份请求，比不批量还费。
-      // 「封面代数」：下拉刷新时靠它换代，而不是靠清缓存。必须同时进三处 ——
-      // ① 进签名（mosaicSignature）：批量重新跑，`folderCoverBatchReady` 在批量出结果前短暂回落，
-      //    卡片不会抢在批量之前自己发一遍请求；
-      // ② 让卡片的重取 key 变化：走**单文件夹兜底**的那些文件夹（批量覆盖不到的，比如合集）
-      //    也会跟着重取 —— 少了这一条，只有批量覆盖到的那批会换图，兜底那批永远不变
-      //    （「下拉刷新换图失效」）。
-      // ③ 传给 `EmbyFolderCoverCache`：同一代里已有值就不再取、换代后才允许再取
-      //    ⇒ 刷新**不需要清缓存**，旧封面原地留着显示，等新封面回来再替换
-      //    （「空占位有点丑」）。
-      // 初值取自缓存而不是写死 0：页面重建时若从 0 数起，会和缓存里条目的代数对不上，
-      // 变成每次进页面都白重取一遍、进程内缓存白做。
-      var folderCoverGen by remember { mutableStateOf(EmbyFolderCoverCache.currentGeneration()) }
-
-      // ── 合成策略：这次进库要不要把已经拼好的封面换一批 ──
-      // 判据只看「距上次整体合成过了多久」（时间戳落盘，见 BrowserPreferences）。
-      // ⚠️ 必须在下面那个批量取封面的 effect **之前**：换代后 mosaicSignature 会跟着变，
-      //    批量 effect 自然重跑 —— 顺序反过来的话这一次进库会用旧代数取一遍、白费一轮请求。
-      // ⚠️ 关掉「合成随机封面图」时整段跳过：固定模式取样结果是确定的，重取还是同一批图。
-      // ⚠️ 键里带策略与本数：改完设置回到库里能立刻按新规矩重判（不必重启 App）。
-      LaunchedEffect(
-        server?.id,
-        folderRandomCover,
-        coverRefreshPolicy,
-        coverRefreshHours,
-        coverRefreshDays,
-      ) {
-        if (server == null || !folderRandomCover) return@LaunchedEffect
-        val now = System.currentTimeMillis()
-        val last = browserPreferences.embyFolderCoverLastSynthAt.get()
-        if (shouldResynthesizeCover(coverRefreshPolicy, last, now, coverRefreshHours, coverRefreshDays)) {
-          // 只换代、不清缓存：旧封面留在原地继续显示，新封面回来后同键覆盖（见 cache 的 KDoc）。
-          EmbyFolderCoverCache.bumpGeneration()
-          folderCoverGen = EmbyFolderCoverCache.currentGeneration()
-          browserPreferences.embyFolderCoverLastSynthAt.set(now)
-        }
-      }
-      val mosaicSignature = remember(libraryId, mosaicFolderIds, folderRandomCover, server?.id, folderCoverGen) {
-        "$libraryId|$folderRandomCover|${server?.id}|$folderCoverGen|" + mosaicFolderIds.joinToString(",")
-      }
-      var batchCoveredSignature by remember { mutableStateOf<String?>(null) }
-      val folderCoverBatchReady = batchCoveredSignature == mosaicSignature
-      LaunchedEffect(mosaicSignature) {
-        val srv = server
-        // 快照当前代数：写入时要带上它，这样「迟到的上一代结果」不会盖掉新代。
-        val gen = folderCoverGen
-        // ⭐ 只取「这一代里还没定下来」的文件夹 —— 已经拼好的**一律不重取**。
-        //    这里是「滑动一下 → 返回上一级 → 再进这个文件夹，有些四宫格又重新生成」
-        //    的主因：签名里带着 `mosaicFolderIds`（这一屏所有需要宫格的文件夹 Id），
-        //    而无限加载会不断往里加新的 ⇒ 签名一变，这个 effect 就被**取消重跑**，
-        //    连已经拼好的那批一起重新取样。随机取样每次结果都不同 ⇒ 已经显示着的
-        //    封面当场洗牌换脸。
-        //    看着像「只有一部分在变、还挺随机」，是因为子项不超过 4 个的文件夹
-        //    怎么抽都是同一批图（抽不出新花样），子项多的那些每次都不一样。
-        // ⚠️ 换代（下拉刷新 / 「每次进入都重新合成」）时 `gen` 变了 ⇒ 缓存里条目的代
-        //    都小于新代 ⇒ pending = 全部，行为与从前一致（整批换脸）。
-        val pending =
-          mosaicFolderIds.filter { fid ->
-            fid.isNotBlank() && !EmbyFolderCoverCache.isResolved(folderCoverKey(fid, folderRandomCover), gen)
-          }
-        if (srv == null || pending.isEmpty()) {
-          batchCoveredSignature = mosaicSignature
-          return@LaunchedEffect
-        }
-        try {
-          viewModel
-            .loadFolderCoverBatch(
-              server = srv,
-              parentId = libraryId,
-              folderIds = pending,
-              random = folderRandomCover,
-            )
-            .forEach { (folderId, urls) ->
-              val key = folderCoverKey(folderId, folderRandomCover)
-              EmbyFolderCoverCache.put(key, urls, gen)
-              folderCovers[key] = urls
-            }
-        } finally {
-          // ⚠️ 请求失败也必须放行：否则所有文件夹的封面都卡在「等批量」上，谁也不去取，整屏空白。
-          // ⚠️ 但**只在自己没被取消时写**：签名变化会先取消老协程再起新的，老协程的
-          //    finally 可能排在新协程**完成之后**才执行，那时写进去的是**旧签名**，
-          //    直接把新签名覆盖掉 ⇒ `folderCoverBatchReady` 变成 false 且再没人来写，
-          //    所有卡片永远卡在「等批量」，整屏封面不加载。
-          //    （`isActive` 在正常收尾的 finally 里仍是 true —— 那时协程还没完成；
-          //     只有被取消时根因已置上，它才是 false。）
-          if (currentCoroutineContext().isActive) {
-            batchCoveredSignature = mosaicSignature
-          }
-        }
-      }
-
       PullRefreshGridBox(
         isRefreshing = isRefreshing,
         // 演员分类下拉刷新要重拉演员，而不是去重拉媒体。
-        // 媒体：顺带把这一屏的文件夹封面**换代**重取（批量覆盖到的与走兜底的都会换，见上）。
         // 刷新后回到顶部（下拉刷新的标准语义）。
         // 不显式归位的话，LazyGrid 会**按条目 key 锚定滚动位置**：一旦刷新后顺序变了，
         // 框架会把「刷新前第一屏的那条」重新定位到它在新列表里现在所在的位置 ——
@@ -2484,19 +1784,6 @@ data class EmbyLibraryScreen(
             // 演员网格同样有 key 锚定问题（演员顺序会变，刷新后原来的首位演员可能被排到后面）
             gridState.scrollToTop()
           } else {
-            // 只换代，**不清缓存、也不清 `folderCovers`** —— 缓存里的旧封面正是刷新期间要继续
-            //   显示的东西；清掉就会露出一片空占位（用户反馈「空占位有点丑」）。
-            //   老条目原地留着显示，新封面取回后按同键覆盖（宫格那边再淡入替换）。
-            // ⚠️ 固定模式（关了「合成随机封面图」）结果是确定的，重取只会拿到同一批
-            //   ⇒ 没必要换代，省掉一整轮请求。
-            if (folderRandomCover) {
-              EmbyFolderCoverCache.bumpGeneration()
-              folderCoverGen = EmbyFolderCoverCache.currentGeneration()
-              // ⚠️ 手动刷新必须**同时记时间戳**：只换代不记时间的话，退出再进来会被
-              //    「满 X 小时 / X 天」判成超期 ⇒ 刚刷完又换一批（白费一整轮请求）。
-              //    手动意图优先于策略，所以这里无条件写 now，不看 policy。
-              browserPreferences.embyFolderCoverLastSynthAt.set(System.currentTimeMillis())
-            }
             pendingScrollTop = true
             load(reset = true)
           }
@@ -2766,10 +2053,6 @@ if (viewMode == EmbyLibraryViewMode.YEAR) {
       server = s,
       viewModel = viewModel,
       cardStyle = cardStyle,
-          folderCovers = folderCovers,
-          folderRandomCover = folderRandomCover,
-          folderCoverBatchReady = folderCoverBatchReady,
-          folderCoverGen = folderCoverGen,
    onClick = {
             // 混合库照片档：队列取当前列表里的照片快照（点击时才算，不随重组白算）
             val photos = displayItems.filter { it.Type == "Photo" }
@@ -2804,10 +2087,6 @@ if (viewMode == EmbyLibraryViewMode.YEAR) {
                       server = s,
                       viewModel = viewModel,
                       cardStyle = cardStyle,
-                      folderCovers = folderCovers,
-                      folderRandomCover = folderRandomCover,
-                      folderCoverBatchReady = folderCoverBatchReady,
-                      folderCoverGen = folderCoverGen,
                       onClick = {
                         // 混合库照片档：队列取当前列表里的照片快照（点击时才算，不随重组白算）
                         val photos = displayItems.filter { it.Type == "Photo" }
@@ -2840,89 +2119,8 @@ if (viewMode == EmbyLibraryViewMode.YEAR) {
           }
         }
 
-        // ── 「正在打开」整页加载层 ──
-        // 位置：内容容器的**最后一个子节点** —— 后声明的画在上层，才盖得住网格；
-        // 同时又排在所有对话框之前，所以弹窗仍然压在它上面。
-        //
-        // 透明底、不染色：与网络位置、Emby 详情页那层同款（纯动画，不压暗内容）。
-        // ⚠️ 必须放在 `when` 之后：放前面会被骨架屏 / 列表盖住，
-        //    四个随机入口里恰恰有三个是在「列表已就绪」的状态下点的。
-        //
-        // ⚠️ 这一层**吞点击**（clickable + null indication，无涟漪）：取数有几百毫秒到几秒，
-        //    空窗期内连点两下 = 拉起两个播放器 / 压两层视界流，是实际会踩到的。
-        if (randomLaunching) {
-          Box(
-            modifier = Modifier
-              .fillMaxSize()
-              .clickable(
-                interactionSource =
-                  remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                indication = null,
-              ) {
-                // 故意的空实现：只用来吃掉取数期间的重复点击
-              },
-            contentAlignment = Alignment.Center,
-          ) {
-            // ⚠️ 用 size 参数（96dp，还会乘「加载动画大小」的缩放）而不是
-            //    Modifier.size —— 后者不走那个缩放（见 AppLoadingIndicator 的 KDoc）。
-            app.marlboroadvance.mpvex.ui.theme.AppLoadingIndicator(size = 96.dp)
-          }
-        }
       }
     }
-
-      // ── 随机抽卡：单抽与多抽共用的全屏揭晓层 ──
-      // 用 Dialog（而不是在本页里叠一层 Box）是为了天然盖住顶栏 / 工具行 / 网格，
-      // 返回键也天然走 onDismiss。取数中 cards 为空，那一层自己播「准备中」的法阵。
-      if (gachaOpen) {
-        EmbyGachaDrawDialog(
-          cards = gachaCards,
-          rollId = gachaRollId,
-          onPlay = { card -> playGachaCards(listOf(card)) },
-          // 整批起播：第 1 张起播，其余按**揭晓顺序**排进播放队列（不打乱）。
-          // ⚠️ 这是**替换**现有队列，不是追加 —— 所以按钮文案是「队列播放」不是「入队」。
-          onPlayAll = { batch -> playGachaCards(batch) },
-          // 单抽才排除「刚抽到的那一条」（重抽要真能换片）；多抽不排除 —— 那会把
-          // 刚看见的第 1 张从下一批池子里无故拿掉，而多抽本来就有「跨批重复」的心理预期。
-          onReroll = {
-            rollGacha(excludeId = if (gachaCards.size == 1) gachaCards.first().item.Id else null)
-          },
-          // 关闭时把非空结果存为上一批，供之后重新查看。
-          // 只存非空的 —— 取数失败 / 还在取数时关掉，不该用空列表顶掉上一批。
-          onDismiss = {
-            gachaOpen = false
-            if (gachaCards.isNotEmpty()) {
-              gachaPrevCards = gachaCards
-              gachaPrevRollId = gachaRollId
-            }
-          },
-          // 多抽点开某一张时才补简介：10 条详情 = 10 次 /Items，不该在揭晓前打。
-          // 失败就返回原卡片（列表数据够画卡面），不让一次补详情把整个详情页顶掉。
-          resolveDetail = { card ->
-            val id = card.item.Id
-            if (id == null) {
-              card
-            } else {
-              val current = viewModel.currentServerOrAwait()
-              if (current == null) {
-                card
-              } else {
-                runCatching { viewModel.loadItemDetail(current, id) }
-                  .getOrNull()
-                  ?.let { card.copy(item = it) }
-                  ?: card
-              }
-            }
-          },
-          // 揭晓动画形态：只有单抽会走横向卡带（多抽的乐趣在「一张张翻开」，
-          // 塞进一个轮盘既看不清也失去批量感），所以这里只管把偏好传下去，
-          // 「什么情况下用」由弹窗自己按 count 判。
-          style = gachaStylePref,
-          // 轮盘的陪跑卡：就是这一抽**没被选中**的那些池子条目。
-          // 空列表时弹窗会自动退回经典翻牌。
-          reelCards = gachaReelCards,
-        )
-      }
 
     // ── 筛选面板（2026-10-09 改为「加号 + 复选对话框 + 圆角标签」版式）──
     // 版式：抽屉里每个「多选」类目一行 = 类目名 + 右侧 `+` 圆钮。
@@ -3340,18 +2538,6 @@ private fun EmbyLibraryMediaCell(
   server: EmbyServer,
   viewModel: EmbyViewModel,
   cardStyle: EmbyCardStyle,
-  folderCovers: MutableMap<String, List<String>>,
-  /** 文件夹宫格封面是否随机合成：影响取图顺序，也参与缓存键 */
-  folderRandomCover: Boolean,
-  /** 这一屏的「批量取封面」是否已经出结果；false 时先别自己发请求，免得和批量重复拉一遍 */
-  folderCoverBatchReady: Boolean,
-  /**
-   * 「封面代数」：下拉刷新时 +1，进 [LaunchedEffect] 的 key。
-   *
-   * 它保证**走单文件夹兜底**的那些文件夹（批量覆盖不到的，比如合集）也跟着重取 ——
-   * 否则刷新只有批量覆盖到的那批会换图，兜底那批永远不变（「刷新换图失效」）。
-   */
-  folderCoverGen: Int,
   onClick: () -> Unit,
   onLongClick: ((androidx.compose.ui.geometry.Offset) -> Unit)?,
   titleMaxLines: Int = 1,
@@ -3381,32 +2567,6 @@ private fun EmbyLibraryMediaCell(
     )
     return
   }
-  val itemId = item.Id
-  // 文件夹 / 合集这类容器条目自身没有封面图，改用内部视频的缩略图拼宫格。
-  // ⚠️ 判定与「批量预取」共用 needsFolderMosaic()，**不要**在这里加
-  //    「服务端给了借来的预览图就不拼」之类的豁免 —— 那个豁免会让被借图的
-  //    视频文件夹只剩一宫格（真机现象），详见该函数的 KDoc。
-  val needsMosaic = needsFolderMosaic(item)
-  val folderCover: List<String>? = if (needsMosaic && itemId != null) {
-    // 缓存键带上「随机 / 固定」：来回切开关时两种结果各存一份，不会互相串图。
-    val coverKey = folderCoverKey(itemId, folderRandomCover)
-    LaunchedEffect(coverKey, server.id, folderCoverBatchReady, folderCoverGen) {
-      // 「要不要取」交给缓存按**代数**判断：同代里已有值 ⇒ beginLoad 返回 false
-      //（滚动、重组的重复进入都不会重复请求）；换代后（下拉刷新）⇒ 返回 true，
-      // 于是连**批量没覆盖到**的那批也会重取。
-      // 批量那一步同理：`folderCoverBatchReady` 为 false 时先等它，免得「批量 + 逐个」双份请求。
-      // ⚠️ 这里**不再**判断 `cached == null`：刷新时旧封面就在缓存里、而那正是要继续显示的一张，
-      //    若因「已经有了」跳过重取，刷新换图就永远不会发生。
-      if (folderCoverBatchReady && EmbyFolderCoverCache.beginLoad(coverKey, folderCoverGen)) {
-        loadAndStoreFolderCover(viewModel, server, itemId, folderRandomCover, folderCoverGen, folderCovers)
-      }
-    }
-    // 显示这份映射里的当前值：刷新时是旧封面（不清），新封面回来按同键覆盖后自动换新。
-    folderCovers[coverKey]
-  } else {
-    null
-  }
-
   EmbyMediaCard(
     server = server,
     title = viewModel.displayTitle(item),
@@ -3414,7 +2574,6 @@ private fun EmbyLibraryMediaCell(
     subtitle = itemSubtitle(item),
     imageUrl = viewModel.imageUrl(server, item, imageTypeFor(cardStyle), 480),
     fallbackImageUrl = viewModel.imageUrl(server, item, "Primary", 480),
-    mosaicUrls = folderCover,
     // 左下角角标：演员是「作品数」（跟分类无关，一直显示）；
     // 「剩余时长」**只在「继续播放」分类里给**（别的分类里它只是噪音）。
     badgeText = item.ChildCount?.takeIf { item.Type == "Person" && it > 0 }?.toString()
@@ -3426,44 +2585,17 @@ private fun EmbyLibraryMediaCell(
     fillWidth = cardStyle == EmbyCardStyle.POSTER,
     onLongClick = onLongClick,
     titleMaxLines = titleMaxLines,
-    // 文件夹类型图标：与宫格封面 / 「点进去还是播放」共用 isFolderLike 这一个判定，
-    // 避免卡片与批量逻辑各写一份、改一处漏一处（见 needsFolderMosaic 的 KDoc）。
+    // 文件夹类型图标与「点进去还是播放」共用 isFolderLike 判定。
     isFolder = isFolderLike(item),
     modifier = modifier,
   )
 }
 
 /**
- * 工具行图标按钮，**支持长按**。
- *
- * 为什么不用 `IconButton`：它只有 `onClick`，接不了长按；而「单击 = 下钻随机 /
- * 长按 = 不下钻」这组语义必须落在同一个图标上（否则工具行要多排一个按钮、
- * 一排图标也更挤）。自铺 48dp 圆形触控区 + `combinedClickable`，
- * 尺寸与 M3 `IconButton` 一致，所以和旁边的筛选 / 视图图标不会高低不齐。
- */
-@Composable
-private fun ToolbarIconAction(
-  icon: ImageVector,
-  contentDescription: String,
-  onClick: () -> Unit,
-  onLongClick: (() -> Unit)? = null,
-) {
-  Box(
-    modifier = Modifier
-      .size(48.dp)
-      .clip(CircleShape)
-      .combinedClickable(onClick = onClick, onLongClick = onLongClick),
-    contentAlignment = Alignment.Center,
-  ) {
-    Icon(imageVector = icon, contentDescription = contentDescription)
-  }
-}
-
-/**
  * 紧凑列表的一行。
  *
  * 左侧一块 3:4 小海报（进度条贴在它底部），右侧片名 / 副标题，最右是心形快捷收藏。
- * 不放封面宫格、作品数角标这类装饰 —— 这一档的诉求就是「一屏扫到尽可能多条」。
+ * 不放作品数角标这类装饰 —— 这一档的诉求就是「一屏扫到尽可能多条」。
  */
 @Composable
 private fun EmbyCompactRow(
@@ -3522,11 +2654,7 @@ private fun EmbyCompactRow(
           Icon(
             imageVector = Icons.Default.Folder,
             contentDescription = "文件夹",
-            tint = if (LocalEmbyAppearance.current.folderIconBlue) {
-              FOLDER_ICON_BLUE
-            } else {
-              Color.White
-            },
+            tint = Color.White,
             modifier = Modifier
               .padding(horizontal = 2.dp, vertical = 2.dp)
               .size(10.dp),
@@ -4002,7 +3130,7 @@ private fun openItem(
       "Season" -> backStack.add(EmbyDetailScreen(itemId = id, title = item.Name.orEmpty()))
 
       // 相册：Emby 的「文件夹」分类里也会有它（照片库 / 家庭视频库），但装的是
-      // 照片不是视频 —— 必须进专用照片网格（瀑布流 + 排序 + 随机播放）。
+      // 照片不是视频 —— 必须进专用照片网格（等比卡片 + 排序）。
       // ⚠️ 不能走下面的 Folder 分支：那边进的是视频库页，默认「仅媒体」口径
       //    （MediaTypes=Video + IsFolder=false）会把照片条目全滤掉，点开是空页。
       "PhotoAlbum" -> backStack.add(
@@ -4451,36 +3579,8 @@ private val RATING_OPTIONS: List<Pair<String, Float?>> = listOf(
   "9 分以上" to 9f,
 )
 
-/** 可播放的媒体类型（随机播放时使用） */
+/** 可直接播放的视频类型，用于浏览结果过滤。 */
 private val PLAYABLE_TYPES = listOf("Movie", "Episode", "Video", "MusicVideo")
-
-/**
- * 「随机抽卡」一次取的候选条数。
- *
- * 卡面只展示一条，但池子给小了（例如跟着「随机播放数量」= 1）重抽就会一直抽回同一部 ——
- * 20 条在列表接口上只是多几百字节，换来的是重抽真的能换片。
- */
-private const val GACHA_POOL_SIZE = 20
-
-/**
- * 「随机抽卡」一次最多揭晓几张。
- *
- * 与设置页那个 `ListPreference`（1 / 3 / 5 / 10）必须同口径：设置值被手改、
- * 或被旧版本写进越界值时，这里兜住 —— 否则一抽 40 张，网格要翻好几屏。
- */
-private const val GACHA_MAX_DRAW = 10
-
-/**
- * 抽卡海报向服务端要的宽度（px，Emby 的 `maxWidth` 是**服务端缩放宽度**）。
- *
- * 原来是 480，但实际显示尺寸对不上：
- *  · 多抽网格小卡 111~180dp 宽（10 张 3 列时约 111dp，1.5 比例）；
- *  · 详情里的缩略图 96dp；单抽大卡封顶 380dp。
- * 2x 屏上 180dp 卡片最多需要 360px，480 已是余量；3x 屏极端情况才会略软，
- * 但海报是 `ContentScale.Crop` 到卡面的，观感上限远低于理论值。
- * 10 张一次性下载时，480 → 320 大约省四成流量，而网格上肉眼看不出差别。
- */
-private const val GACHA_POSTER_WIDTH = 320
 
 /**
  * 搜索结果的**客户端排序**。
@@ -4537,53 +3637,12 @@ private fun applyClientSort(
 private fun matchesSelectedNames(selected: Set<String>, values: List<String>?): Boolean =
   selected.isEmpty() || values.orEmpty().any { it in selected }
 
-/**
- * 随机播放一次取多少条 —— 读设置项并做护栏。
- *
- * 下限 1 是硬性的：填 0 会让「随机播放」变成一个永远点不出东西的按钮；
- * 上限 500 是软性的：再多服务端一次也给不出有意义的结果，而且这批 Uri
- * 要经 Intent 传给播放器，太大有撑爆 Binder 事务上限的风险。
- */
-private fun Preference<Int>.randomPlayLimit(): Int = get().coerceIn(1, 500)
-
 /** 文件夹类条目。只在「文件夹」分类里显示，其它分类一律排除。 */
 private val FOLDER_TYPES = listOf("Folder", "CollectionFolder", "UserView")
 
-/**
- * 是否需要「多宫格封面」的容器类条目。
- *
- * 这些条目在 Emby 里只是容器，自身没有 Primary 图（请求图片接口直接 404），
- * 所以要用内部子媒体的缩略图拼封面。
- */
+/** 需要下钻浏览的文件夹与合集容器。 */
 private fun isFolderLike(item: EmbyItem): Boolean =
   item.Type in FOLDER_TYPES || item.Type == "BoxSet"
-
-/**
- * 这个容器条目要不要拼宫格封面。
- *
- * 判定只有两条：是容器、且自己没有主图。
- *
- * ⚠️ **这里绝对不能加「有借来的预览图就不拼」这种豁免** —— 曾经有过一条
- * `!item.hasBorrowedPrimaryImage()`，在真机上造成的现象是「同是视频文件夹，有的四宫格、
- * 有的一整张缩略图」（用户反馈）。原因是：
- *
- * 1. 服务端会**给视频文件夹也「借」一张图**（`PrimaryImageItemId` 指向它内部第一条媒体，
- *    见 `EmbyPrimaryImage` 的线上实证）。文件夹自己 `ImageTags` 里没有 `Primary`，
- *    于是「借来的图」这条路一走，宫格就被整条跳过，直接显示那**一张**图 ——
- *    而那张图就是它内部第一个视频的一帧，摆在宫格的位置上就是「只有一宫格」。
- * 2. 「服务端被借图」这件事对哪些文件夹成立、对哪些不成立，用户完全不可预期
- *    ⇒ 同一屏里就出现了四宫格 / 一宫格并存的割裂观感。
- * 3. 更关键的是：那条豁免**本来是想省掉相册的子项查询**（用户服务器上有 84 个相册），
- *    可相册（`PhotoAlbum`）压根不在 [FOLDER_TYPES] 里、也走不到这个函数 ——
- *    这条豁免从头到尾**没有一次是按设计意图生效的**，只是在误伤视频文件夹。
- *    相册要走照片网格页（见 `openItem` 的 PhotoAlbum 分支），预览图由那边显示。
- *
- * 两处调用（批量预取 `mosaicFolderIds` 与卡片 `EmbyLibraryMediaCell`）必须共用这一个
- * 函数：两处各写一份内联判定，一旦其中一处改了、另一处没改，就会出现
- * 「进了批量预取但卡片不认」或反过来的半套行为，比不做还难查。
- */
-private fun needsFolderMosaic(item: EmbyItem): Boolean =
-  isFolderLike(item) && item.ImageTags["Primary"] == null
 
 /**
  * 能「扫描」的条目：媒体库（UserView / CollectionFolder）和真实文件夹。
@@ -4592,172 +3651,6 @@ private fun needsFolderMosaic(item: EmbyItem): Boolean =
  * 背后没有对应的物理目录，让服务器去扫它扫不出任何东西。
  */
 private fun isScannableFolder(item: EmbyItem): Boolean = item.Type in FOLDER_TYPES
-
-/**
- * 文件夹宫格封面的缓存键：**文件夹 Id + 取样模式**。
- *
- * ⚠️ 键的拼法只留这一处 —— 卡片的读取、下拉刷新的重取、[EmbyFolderCoverCache] 的存取
- * 全都调它。分两处手写迟早会对不上（对不上就是「切开关后看到串掉的旧图」）。
- */
-private fun folderCoverKey(
-  folderId: String,
-  random: Boolean,
-): String = "$folderId|$random"
-
-/**
- * 取一次文件夹宫格封面，并**同时**写进进程内缓存与当前页面这份内存映射。
- *
- * 两条路径都走它：卡片首次出现时的 `LaunchedEffect`、以及下拉刷新时的重取。
- * 抽成一个函数是因为「写进哪儿」必须一致 —— 只写内存映射不写缓存，
- * 离开页面再回来就又是旧的；只写缓存不写映射，当前这一屏不会变。
- *
- * ⚠️ 被取消（换代 / 离开页面）时**不能写入**：这时上层拿到的会是空列表（取封面那条
- * `runCatching` 语义），一写就把缓存里的旧封面覆盖成空 ⇒ 刷新瞬间反而变空白。
- * 所以这里捕获取消、摘掉「在飞」标记后原样抛出。
- */
-private suspend fun loadAndStoreFolderCover(
-  viewModel: EmbyViewModel,
-  server: EmbyServer,
-  folderId: String,
-  random: Boolean,
-  generation: Int,
-  into: MutableMap<String, List<String>>,
-) {
-  val key = folderCoverKey(folderId, random)
-  val urls =
-    try {
-      viewModel.loadFolderCoverUrls(server, folderId, count = 4, random = random)
-    } catch (e: CancellationException) {
-      EmbyFolderCoverCache.abort(key)
-      throw e
-    }
-  EmbyFolderCoverCache.put(key, urls, generation)
-  into[key] = urls
-}
-
-/**
- * 文件夹宫格封面的进程内缓存（键是「文件夹 Id + 取样模式」的组合串）。
- *
- * 一个文件夹的封面要额外发一次 /Items 查询才能拿到子项缩略图，比较贵；
- * 缓存后滚动列表、切分类、从子页面返回都不必重复请求。
- * 取不到的（空文件夹）会缓存成空列表，避免反复重试把服务器打满。
- *
- * ⚠️ 键里带「随机 / 固定」模式：随机封面的结果每次都可能不同，
- * 若只按文件夹 Id 存，用户在设置里来回切开关就会看到串掉的旧图。
- *
- * 「换代」而不是「清空」：缓存里的旧封面是**下拉刷新期间要继续显示**的东西
- * （清空就会露出一片空占位，用户反馈「空占位有点丑」）。所以刷新只把 [generation] +1，
- * 老条目原地留着显示，重取回来再把同键的值换掉 —— 视觉上是「换脸」，不是「先变空再出现」。
- */
-private object EmbyFolderCoverCache {
-  /**
-   * 最多留多少条合成结果。
-   *
-   * 一条只是「4 个图片地址字符串」，几百条的开销可以忽略 —— 定小了反而是坑：
-   *    被淘汰的文件夹下次进来要**重新取样**，四宫格当场洗牌，用户看到的就是
-   *    「有些封面又重新生成了一遍，还挺随机」。定大一点，正常翻库根本碰不到淘汰。
-   */
-  private const val MAX_ENTRIES = 800
-
-  /** 一条封面：图片地址 + 它属于哪一代（见 [generation]） */
-  private class Cover(
-    val urls: List<String>,
-    val generation: Int,
-  )
-
-  private val entries = LinkedHashMap<String, Cover>()
-
-  /** 正在飞的键（同一键同一时间只允许一个请求） */
-  private val loading = HashSet<String>()
-
-  /**
-   * 「封面代数」：下拉刷新时 +1。
-   *
-   * 放在这里（而不是页面里）是因为**它必须跨页面存活** —— 页面重建时若从 0 重新数起，
-   * 就会和缓存里条目的代数对不上，于是每次进页面都白重取一遍，进程内缓存白做。
-   */
-  @Volatile
-  private var generation = 0
-
-  fun currentGeneration(): Int = generation
-
-  /** 下拉刷新时调用；之后所有文件夹（含走单文件夹兜底那批）都会在重取完成后换图。 */
-  @Synchronized
-  fun bumpGeneration() {
-    generation++
-  }
-
-  @Synchronized
-  fun snapshot(): Map<String, List<String>> {
-    val out = LinkedHashMap<String, List<String>>(entries.size)
-    entries.forEach { (key, cover) -> out[key] = cover.urls }
-    return out
-  }
-
-  /**
-   * 返回 true 表示这次由调用方发起加载。
-   *
-   * @param gen 调用方当前的封面代数（[currentGeneration]）。同一代里已经有值 ⇒ 不再取；
-   *   换代后 ⇒ 允许再取一次。这就是「刷新时保留旧图、后台换新图」的开关。
-   */
-  /**
-   * 这一代里这张封面**是不是已经有结果了**。
-   *
-   * 批量预取用它筛掉已经拼好的文件夹，避免「整批重取一遍」。
-   *
-   * 用 `>=` 而不是 `==`：换代极快时可能出现「缓存里存的是更新的代」这种情况
-   *    （比如连续两次下拉刷新），这时它对我们这一代**同样算已定**，不该再取；
-   *    判成 `==` 就会把新代的结果又覆盖一次，画面白闪。
-   */
-  @Synchronized
-  fun isResolved(
-    folderId: String,
-    gen: Int,
-  ): Boolean {
-    val cover = entries[folderId] ?: return false
-    return cover.generation >= gen
-  }
-
-  @Synchronized
-  fun beginLoad(
-    folderId: String,
-    gen: Int,
-  ): Boolean {
-    if (loading.contains(folderId)) return false
-    if (isResolved(folderId, gen)) return false
-    loading.add(folderId)
-    return true
-  }
-
-  @Synchronized
-  fun put(
-    folderId: String,
-    urls: List<String>,
-    gen: Int,
-  ) {
-    loading.remove(folderId)
-    // 迟到的上一代结果不要盖掉新代（换代瞬间两代请求可能同时在飞）
-    val existing = entries[folderId]
-    if (existing != null && existing.generation > gen) return
-    entries.remove(folderId)
-    entries[folderId] = Cover(urls, gen)
-    while (entries.size > MAX_ENTRIES) {
-      val oldest = entries.keys.firstOrNull() ?: break
-      entries.remove(oldest)
-    }
-  }
-
-  /**
-   * 请求作废（失败 / 被取消）：只摘掉「在飞」标记，**不写值**。
-   *
-   * ⚠️ 不清这个标记的话，换代时被取消的那次请求会把键永久钉在 `loading` 里，
-   * 之后 [beginLoad] 恒返回 false ⇒ 那个文件夹再也换不了图。
-   */
-  @Synchronized
-  fun abort(folderId: String) {
-    loading.remove(folderId)
-  }
-}
 
 /**
  * 「全部」分类下按媒体库类型限定条目类型。

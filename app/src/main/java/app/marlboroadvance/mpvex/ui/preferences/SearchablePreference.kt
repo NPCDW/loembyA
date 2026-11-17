@@ -30,7 +30,7 @@ data class SearchablePreference(
  * All searchable preferences indexed for settings search.
  *
  * 索引由下面的手写清单（带英文关键词）与 [generatedSearchablePreferences] 合并，
- * 后者从各设置页源码自动抽取。合并时手写优先，以保留
+ * 后者补充各设置页的可定位行。合并时手写优先，以保留
  * amoled / vulkan / danmaku 这类英文别名。
  */
 object SearchablePreferences {
@@ -64,44 +64,12 @@ object SearchablePreferences {
             add(SearchablePreference(
                 titleRes = R.string.pref_player,
                 summaryRes = R.string.pref_player_summary,
-                keywords = listOf("player", "orientation", "gestures", "controls", "playback"),
+                keywords = listOf("player", "controls", "playback"),
                 category = "Player",
                 screen = PlayerPreferencesScreen,
             ))
             add(SearchablePreference(
-                titleRes = R.string.pref_player_save_position_on_quit,
-                keywords = listOf("save", "position", "resume", "remember", "progress"),
-                category = "Player",
-                screen = PlayerPreferencesScreen,
-            ))
-            add(SearchablePreference(
-                titleRes = R.string.pref_player_close_after_eof,
-                keywords = listOf("close", "end", "playback", "quit", "finish"),
-                category = "Player",
-                screen = PlayerPreferencesScreen,
-            ))
-            add(SearchablePreference(
-                titleRes = R.string.pref_player_remember_brightness,
-                keywords = listOf("brightness", "remember", "display", "screen"),
-                category = "Player",
-                screen = PlayerPreferencesScreen,
-            ))
-            add(SearchablePreference(
-                titleRes = R.string.pref_player_remember_series_brightness,
-                summaryRes = R.string.pref_player_remember_series_brightness_summary,
-                keywords = listOf("brightness", "remember", "series", "per", "display", "screen"),
-                category = "Player",
-                screen = PlayerPreferencesScreen,
-            ))
-            add(SearchablePreference(
-                titleRes = R.string.i18n_autoplay_next_video,
-                summaryRes = R.string.pref_autoplay_next_video_summary,
-                keywords = listOf("autoplay", "next", "episode", "video", "auto", "advance", "continuous", "自动续集", "连播"),
-                category = "Player",
-                screen = PlayerPreferencesScreen,
-            ))
-            add(SearchablePreference(
-                titleRes = R.string.pref_auto_pip_title,
+                title = "自动画中画",
                 summaryRes = R.string.pref_auto_pip_summary,
                 keywords = listOf("pip", "picture", "auto", "navigation", "home", "back"),
                 category = "Player",
@@ -109,71 +77,75 @@ object SearchablePreferences {
             ))
             add(SearchablePreference(
                 titleRes = R.string.pref_player_display_hide_player_control_time,
-                keywords = listOf("time", "hide", "controls", "disappear", "timeout", "ms"),
+                keywords = listOf(
+                  "time", "hide", "controls", "disappear", "timeout", "seconds", "never", "秒", "永不",
+                ),
                 category = "Player",
                 screen = PlayerPreferencesScreen,
             ))
             add(SearchablePreference(
                 titleRes = R.string.pref_player_use_precise_seeking,
                 keywords = listOf("precise", "seek", "keyframes", "accurate", "navigation"),
-                category = "Player",
-                screen = PlayerPreferencesScreen,
+                category = "Gestures",
+                screen = GesturePreferencesScreen,
+            ))
+            add(SearchablePreference(
+                titleRes = R.string.pref_player_custom_skip_duration_title,
+                summaryRes = R.string.pref_player_custom_skip_duration_summary,
+                keywords = listOf("custom", "skip", "seek", "duration", "seconds", "跳转", "时长"),
+                category = "Gestures",
+                screen = GesturePreferencesScreen,
             ))
             add(SearchablePreference(
                 titleRes = R.string.pref_player_gestures_brightness,
                 keywords = listOf("brightness", "gesture", "swipe", "display", "control"),
-                category = "Player",
-                screen = PlayerPreferencesScreen,
+                category = "Gestures",
+                screen = GesturePreferencesScreen,
             ))
             add(SearchablePreference(
                 titleRes = R.string.pref_player_gestures_volume,
                 keywords = listOf("volume", "gesture", "swipe", "audio", "sound"),
-                category = "Player",
-                screen = PlayerPreferencesScreen,
+                category = "Gestures",
+                screen = GesturePreferencesScreen,
             ))
             add(SearchablePreference(
                 titleRes = R.string.pref_player_gestures_pinch_to_zoom,
                 keywords = listOf("zoom", "pinch", "gesture", "scale", "crop", "video"),
-                category = "Player",
-                screen = PlayerPreferencesScreen,
+                category = "Gestures",
+                screen = GesturePreferencesScreen,
             ))
             add(SearchablePreference(
                 titleRes = R.string.pref_player_gestures_horizontal_swipe_to_seek,
                 keywords = listOf("horizontal", "swipe", "seek", "gesture", "left", "right"),
-                category = "Player",
-                screen = PlayerPreferencesScreen,
+                category = "Gestures",
+                screen = GesturePreferencesScreen,
             ))
             add(SearchablePreference(
                 titleRes = R.string.pref_player_gestures_horizontal_swipe_sensitivity,
                 summaryRes = R.string.pref_player_gestures_horizontal_swipe_sensitivity_summary,
                 keywords = listOf("horizontal", "swipe", "sensitivity", "seek", "distance", "speed"),
-                category = "Player",
-                screen = PlayerPreferencesScreen,
+                category = "Gestures",
+                screen = GesturePreferencesScreen,
+            ))
+            add(SearchablePreference(
+                titleRes = R.string.pref_player_haptic_feedback,
+                summaryRes = R.string.pref_player_haptic_feedback_summary,
+                keywords = listOf("haptic", "vibration", "feedback", "gesture"),
+                category = "Gestures",
+                screen = GesturePreferencesScreen,
             ))
             add(SearchablePreference(
                 titleRes = R.string.pref_player_gestures_hold_for_multiple_speed,
                 keywords = listOf("hold", "speed", "multiple", "playback", "tempo", "rate"),
-                category = "Player",
-                screen = PlayerPreferencesScreen,
+                category = "Gestures",
+                screen = GesturePreferencesScreen,
             ))
             add(SearchablePreference(
-                titleRes = R.string.pref_dynamic_speed_overlay_title,
+                title = "动态倍速浮层",
                 summaryRes = R.string.pref_dynamic_speed_overlay_summary,
                 keywords = listOf("dynamic", "speed", "overlay", "control", "hold", "swipe"),
-                category = "Player",
-                screen = PlayerPreferencesScreen,
-            ))
-            add(SearchablePreference(
-                titleRes = R.string.pref_player_controls_allow_gestures_in_panels,
-                keywords = listOf("gestures", "panels", "controls", "overlay", "enable"),
-                category = "Player",
-                screen = PlayerPreferencesScreen,
-            ))
-            add(SearchablePreference(
-                titleRes = R.string.pref_player_controls_show_loading_circle,
-                keywords = listOf("loading", "circle", "indicator", "buffer", "progress"),
-                category = "Player",
-                screen = PlayerPreferencesScreen,
+                category = "Gestures",
+                screen = GesturePreferencesScreen,
             ))
             add(SearchablePreference(
                 titleRes = R.string.pref_player_display_show_status_bar,
@@ -299,13 +271,6 @@ object SearchablePreferences {
                 category = "Decoder",
                 screen = DecoderPreferencesScreen,
             ))
-            add(SearchablePreference(
-                titleRes = R.string.pref_anime4k_title,
-                summaryRes = R.string.pref_anime4k_summary,
-                keywords = listOf("anime4k", "upscale", "shader", "anime", "upscale"),
-                category = "Decoder",
-                screen = DecoderPreferencesScreen,
-            ))
 
             // Subtitle preferences
             add(SearchablePreference(
@@ -318,13 +283,6 @@ object SearchablePreferences {
             add(SearchablePreference(
                 titleRes = R.string.pref_preferred_languages,
                 keywords = listOf("language", "preferred", "subtitle", "audio", "locale", "code"),
-                category = "Subtitles",
-                screen = SubtitlesPreferencesScreen,
-            ))
-            add(SearchablePreference(
-                titleRes = R.string.pref_subtitles_autoload_title,
-                summaryRes = R.string.pref_subtitles_autoload_summary,
-                keywords = listOf("autoload", "automatic", "subtitles", "external", "load"),
                 category = "Subtitles",
                 screen = SubtitlesPreferencesScreen,
             ))
@@ -462,10 +420,10 @@ object SearchablePreferences {
     }
 
     /**
-     * 全量索引：手写清单 + 自动抽取清单。
+     * 全量索引：英文关键词清单 + 可定位行清单。
      *
      * 手写那份排前面 —— 它带英文关键词，且指向的是「专页」而不是设置首页。
-     * 自动抽取那份按 [dedupeKey] 去重后再并入，所以不会出现同一个配置项两条。
+     * 补充那份按 [dedupeKey] 去重后再并入，所以不会出现同一个配置项两条。
      */
     val allPreferences: List<SearchablePreference> by lazy {
         val seen = HashSet<String>()

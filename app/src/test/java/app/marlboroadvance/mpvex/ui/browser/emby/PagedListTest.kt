@@ -22,6 +22,12 @@ class PagedListTest {
   private data class Row(val id: Int)
 
   @Test
+  fun `browse pagination keeps ordinary pages and loads only near end by default`() {
+    assertEquals(100, PagedList.DEFAULT_PAGE_SIZE)
+    assertEquals(2, PagedList.PREFETCH_DISTANCE)
+  }
+
+  @Test
   fun `episode playlist pages by raw consumption dedupes and replaces current`() = runTest {
     val current = EmbyItem(Id = "episode-175", Name = "Current", Type = "Episode")
     val starts = mutableListOf<Int>()

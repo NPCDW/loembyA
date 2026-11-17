@@ -72,7 +72,6 @@ import app.marlboroadvance.mpvex.ui.browser.emby.AutoLoadMore
 import app.marlboroadvance.mpvex.ui.browser.emby.EmbyPagingFooter
 import app.marlboroadvance.mpvex.ui.browser.emby.pagingSource
 import app.marlboroadvance.mpvex.ui.browser.emby.rememberBrowsePage
-import app.marlboroadvance.mpvex.ui.browser.emby.rememberPredictivePreloadDistance
 import app.marlboroadvance.mpvex.ui.cine.CineMediaUi
 import app.marlboroadvance.mpvex.ui.cine.CineTheme
 import app.marlboroadvance.mpvex.ui.cine.components.CineFilterChip
@@ -107,7 +106,7 @@ import org.koin.compose.koinInject
  *
  * ## 分页与刷新
  * 走项目统一的 [PagedList]：切 Chip / 换排序 / 下拉刷新都只是 `reload`，
- * 触底续拉由 [AutoLoadMore] 负责，预取距离读「预测性懒加载」偏好（不硬编码）。
+ * 触底续拉由 [AutoLoadMore] 负责，固定在距末尾两项时加载下一页。
  */
 @Composable
 fun CineLibraryScreen(
@@ -163,7 +162,6 @@ fun CineLibraryScreen(
 
   val gridState: LazyGridState = rememberLazyGridState()
   val listState = rememberLazyListState()
-  val preloadDistance = rememberPredictivePreloadDistance(prefs)
 
   // 换库 / 换分类 / 换排序 / 刷新 = 整批替换，必须回顶：停在上一批的中段会让人以为
   // 「排序没生效」，随机排序时更明显。统一走 ScrollToTopOnOrderChange
@@ -205,7 +203,6 @@ fun CineLibraryScreen(
 
   page.AutoLoadMore(
     source = if (listMode) listState.pagingSource() else gridState.pagingSource(),
-    distance = preloadDistance,
     loader = ::loadPage,
   )
 

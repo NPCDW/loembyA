@@ -48,7 +48,6 @@ import androidx.core.view.drawToBitmap
 import app.marlboroadvance.mpvex.R
 import androidx.compose.ui.unit.dp
 import app.marlboroadvance.mpvex.preferences.AppearancePreferences
-import app.marlboroadvance.mpvex.preferences.BrowserPreferences
 import app.marlboroadvance.mpvex.preferences.preference.collectAsState
 import app.marlboroadvance.mpvex.ui.browser.emby.components.EmbyAppearance
 import app.marlboroadvance.mpvex.ui.browser.emby.components.LocalEmbyAppearance
@@ -216,11 +215,6 @@ fun MpvexTheme(content: @Composable () -> Unit) {
     val darkMode by preferences.darkMode.collectAsState()
     val amoledMode by preferences.amoledMode.collectAsState()
     val appTheme by preferences.appTheme.collectAsState()
-    // Emby 卡片的统一外观（圆角 / 角标）：在主题层统一提供一次，全 App 的卡片自动保持一致
-    val browserPreferences = koinInject<BrowserPreferences>()
-    val embyCardCorner by browserPreferences.embyCardCorner.collectAsState()
-    val embyShowCardBadges by browserPreferences.embyShowCardBadges.collectAsState()
-    val embyFolderIconBlue by browserPreferences.embyFolderIconBlue.collectAsState()
     val darkTheme = isSystemInDarkTheme()
     val context = LocalContext.current
 
@@ -259,14 +253,9 @@ fun MpvexTheme(content: @Composable () -> Unit) {
     CompositionLocalProvider(
         LocalSpacing provides Spacing(),
         LocalThemeTransitionState provides rememberThemeTransitionState(),
-        // 本地 / 网络卡片圆角（FolderCard、VideoCard、NetworkMediaCard…）
-        LocalCardCorner provides embyCardCorner.coerceIn(0, 24).dp,
-        // Emby 卡片的圆角 / 角标开关在这里统一下发（详见 EmbyAppearance）
-        LocalEmbyAppearance provides EmbyAppearance(
-            corner = embyCardCorner.coerceIn(0, 24).dp,
-            showBadges = embyShowCardBadges,
-            folderIconBlue = embyFolderIconBlue,
-        ),
+        // Fixed browse appearance applies to both Classic and Cine.
+        LocalCardCorner provides 12.dp,
+        LocalEmbyAppearance provides EmbyAppearance(),
     ) {
         ThemeTransitionContent {
             MaterialTheme(

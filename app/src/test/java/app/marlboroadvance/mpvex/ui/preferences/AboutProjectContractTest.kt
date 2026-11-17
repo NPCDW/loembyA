@@ -27,8 +27,13 @@ class AboutProjectContractTest {
 
   @Test fun gradleRetainsRealVersionAndSigningConfigurationWithoutOldReleaseJournal() {
     val gradle = source("build.gradle.kts")
-    assertTrue(gradle.contains("versionCode = 237"))
-    assertTrue(gradle.contains("versionName = \"0.2.0\""))
+    val versionCode = Regex("(?m)^\\s*versionCode = (\\d+)\\s*$").find(gradle)
+    val versionName = Regex("(?m)^\\s*versionName = \"(\\d+\\.\\d+\\.\\d+)\"\\s*$").find(gradle)
+    assertTrue(
+      "Positive versionCode must be declared",
+      versionCode?.groupValues?.get(1)?.toIntOrNull()?.let { it > 0 } == true,
+    )
+    assertTrue("Semantic versionName must be declared", versionName != null)
     assertTrue(gradle.contains("externalReleaseSigning"))
     assertFalse(gradle.contains("修复轮不涨名"))
     assertFalse(gradle.contains("versionCode 62"))

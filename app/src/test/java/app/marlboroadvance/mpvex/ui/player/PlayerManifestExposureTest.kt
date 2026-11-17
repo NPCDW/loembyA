@@ -27,22 +27,14 @@ class PlayerManifestExposureTest {
     activities().single { it.getAttributeNS(android, "name") == name }
 
   @Test
-  fun `mpv video activities are internal without external intent filters`() {
-    val orientations = mapOf(
-      ".ui.player.PlayerActivity" to "landscape",
-      ".ui.player.feed.VerticalFeedActivity" to "sensorLandscape",
-    )
-    for ((name, orientation) in orientations) {
-      val activity = activity(name)
-      assertEquals(name, "false", activity.getAttributeNS(android, "exported"))
-      assertEquals(name, 0, activity.getElementsByTagName("intent-filter").length)
-      assertEquals(name, "singleTask", activity.getAttributeNS(android, "launchMode"))
-      assertEquals(name, orientation, activity.getAttributeNS(android, "screenOrientation"))
-    }
-    assertEquals(
-      "true",
-      activity(".ui.player.PlayerActivity").getAttributeNS(android, "supportsPictureInPicture"),
-    )
+  fun `mpv video activity is internal without external intent filters`() {
+    val activity = activity(".ui.player.PlayerActivity")
+    assertEquals("false", activity.getAttributeNS(android, "exported"))
+    assertEquals(0, activity.getElementsByTagName("intent-filter").length)
+    assertEquals("singleTask", activity.getAttributeNS(android, "launchMode"))
+    assertEquals("landscape", activity.getAttributeNS(android, "screenOrientation"))
+    assertEquals("true", activity.getAttributeNS(android, "supportsPictureInPicture"))
+    assertFalse(activities().any { it.getAttributeNS(android, "name").contains(".player.feed.") })
   }
 
   @Test
@@ -54,7 +46,7 @@ class PlayerManifestExposureTest {
   @Test
   fun `all non playback activity pages are portrait`() {
     activities().filterNot {
-      it.getAttributeNS(android, "name") in setOf(".ui.player.PlayerActivity", ".ui.player.feed.VerticalFeedActivity")
+      it.getAttributeNS(android, "name") == ".ui.player.PlayerActivity"
     }.forEach { activity ->
       assertEquals(
         activity.getAttributeNS(android, "name"),

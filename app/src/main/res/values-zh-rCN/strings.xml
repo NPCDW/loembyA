@@ -68,8 +68,6 @@
   <!-- 播放器偏好 -->
   <string name="pref_autoplay_title">启用上一个 / 下一个导航</string>
   <string name="pref_autoplay_summary">为同文件夹内的所有视频显示上一个 / 下一个按钮</string>
-  <string name="pref_autoplay_next_video_title">自动播放下一个视频</string>
-  <string name="pref_autoplay_next_video_summary">当前视频结束后自动播放下一个</string>
   <string name="pref_auto_pip_title">自动画中画</string>
   <string name="pref_auto_pip_summary">按主页键或返回键时自动进入画中画模式</string>
   <string name="pref_dynamic_speed_overlay_title">动态倍速浮层</string>
@@ -92,7 +90,7 @@
   <string name="pref_clear_thumbnail_cache_title">清除缩略图缓存</string>
   <string name="pref_clear_thumbnail_cache_summary">删除所有已缓存的视频缩略图（浏览文件夹时会重新生成）</string>
   <string name="pref_player">播放器</string>
-  <string name="pref_player_summary">屏幕方向、手势与控件</string>
+  <string name="pref_player_summary">播放与控件</string>
   <string name="pref_player_orientation">屏幕方向</string>
   <string name="pref_player_orientation_free">自由</string>
   <string name="pref_player_orientation_video">跟随视频</string>
@@ -102,15 +100,10 @@
   <string name="pref_player_orientation_landscape">横屏</string>
   <string name="pref_player_orientation_reverse_landscape">反向横屏</string>
   <string name="pref_player_orientation_sensor_landscape">传感器横屏</string>
-  <string name="pref_player_save_position_on_quit">退出时保存播放位置</string>
   <string name="pref_player_double_tap_seek_duration">双击快进时长</string>
   <string name="pref_player_custom_skip_duration_title">自定义跳过时长</string>
   <string name="pref_player_custom_skip_duration_summary">点击自定义跳过按钮时前进的时长</string>
   <string name="pref_player_seeking_title">快进 / 快退</string>
-  <string name="pref_player_close_after_eof">播放结束后关闭</string>
-  <string name="pref_player_remember_brightness">记住屏幕亮度</string>
-  <string name="pref_player_remember_series_brightness">按剧记住亮度</string>
-  <string name="pref_player_remember_series_brightness_summary">每部剧恢复各自上次的亮度，而不是共用一个值</string>
   <string name="pref_player_gestures">手势</string>
   <string name="pref_player_gestures_brightness">亮度手势</string>
   <string name="pref_player_gestures_volume">音量手势</string>
@@ -123,13 +116,11 @@
   <string name="pref_player_haptic_feedback_summary">滑动快进与调节倍速时轻微震动提示</string>
   <string name="pref_player_gestures_hold_for_multiple_speed">长按多倍速</string>
   <string name="pref_player_controls">控件</string>
-  <string name="pref_player_controls_allow_gestures_in_panels">面板内允许手势</string>
-  <string name="pref_player_controls_show_loading_circle">显示加载圈</string>
   <string name="pref_player_display_show_status_bar">显示控件时显示状态栏</string>
   <string name="pref_player_display_panel_opacity">面板不透明度</string>
   <string name="pref_player_display">显示</string>
   <string name="pref_gesture">手势</string>
-  <string name="pref_gesture_summary">双击、媒体控制</string>
+  <string name="pref_gesture_summary">滑动、缩放、跳转、长按倍速、双击与媒体控制</string>
   <string name="pref_gesture_double_tap_title">双击</string>
   <string name="pref_gesture_double_tap_none">无</string>
   <string name="pref_gesture_double_tap_seek">快进 / 快退</string>
@@ -186,8 +177,6 @@
   <string name="pref_custom_lua_summary">用 Lua 代码管理自定义播放按钮</string>
   <string name="pref_preferred_languages">首选语言</string>
   <string name="pref_subtitles_fonts_dir">字体目录</string>
-  <string name="pref_subtitles_autoload_title">自动加载字幕</string>
-  <string name="pref_subtitles_autoload_summary">自动加载同名的外挂字幕</string>
   <string name="pref_audio">音频</string>
   <string name="pref_audio_summary">首选语言、声道、音调校正</string>
   <string name="pref_audio_pitch_correction_title">启用音调校正</string>
@@ -198,14 +187,6 @@
   <string name="pref_audio_normalization_light">轻度</string>
   <string name="pref_audio_normalization_medium">中度</string>
   <string name="pref_audio_normalization_strong">强力</string>
-  <string name="pref_auto_crop_black_bars_title">自动裁切黑边</string>
-  <string name="pref_auto_crop_black_bars_summary">每部新视频自动探测并裁掉四周黑边</string>
-  <string name="player_toggle_auto_crop_on">已开启 —— 每部视频自动探测</string>
-  <string name="player_toggle_auto_crop_off">已关闭 —— 可在快捷功能里手动探测</string>
-  <string name="player_action_auto_crop">自动裁黑边</string>
-  <string name="player_crop_applied">已裁掉黑边</string>
-  <string name="player_crop_failed">未识别到黑边</string>
-  <string name="player_crop_off">已还原画面</string>
   <string name="player_speed_decrease">减速 0.05 倍</string>
   <string name="player_speed_increase">加速 0.05 倍</string>
   <string name="pref_audio_channels">声道</string>
@@ -232,11 +213,8 @@
   <string name="pref_advanced_clear_fonts_cache">清除字体缓存</string>
   <string name="pref_advanced_cleared_fonts_cache">已清除字体缓存</string>
   <string name="pref_advanced_features_tooltip">启用实验性或高级功能，如统计页面与 Anime4K 超分</string>
-  <string name="pref_anime4k_title">Anime4K 超分（实验性）</string>
-  <string name="pref_anime4k_summary">启用 Anime4K 超分滤镜</string>
   <string name="pref_anime4k_incompatibility">Anime4K 不兼容</string>
   <string name="pref_anime4k_gpu_next_error">gpu-next 与 Anime4K 着色器不兼容。启用 Anime4K 后，应用将自动改用旧版 gpu 后端以保证着色器兼容。</string>
-  <string name="pref_anime4k_cannot_use_with_gpu_next">启用 gpu-next 时无法使用 Anime4K</string>
   <string name="anime4k_mode_title">Anime4K 预设</string>
   <string name="anime4k_mode_toast">Anime4K：预设 %1$s</string>
   <string name="anime4k_quality_title">Anime4K 变体</string>
@@ -310,6 +288,7 @@
   <string name="toast_file_no_longer_exists">文件已不存在</string>
   <string name="toast_playback_failed">播放失败：无法打开该媒体</string>
   <string name="pref_player_display_hide_player_control_time">隐藏播放器控件时间</string>
+  <string name="pref_player_control_hide_never">永不</string>
   <plurals name="seconds">
     <item quantity="other">%1$d 秒</item>
   </plurals>
@@ -346,19 +325,14 @@
   <string name="notification_channel_description">媒体播放控制</string>
   <string name="notification_playing">正在播放</string>
   <string name="pref_player_use_precise_seeking">使用精确跳转</string>
-  <string name="pref_player_disk_cache">临时磁盘缓冲</string>
   <string name="player_buffering">正在缓冲…</string>
   <string name="player_buffering_progress">正在缓冲… %1$d%%</string>
-  <string name="pref_player_disk_cache_summary">播放期间将 demuxer 数据暂存到磁盘，关闭后删除；不支持离线播放或跨会话复用</string>
-  <string name="pref_player_clear_disk_cache">清除播放缓存</string>
-  <string name="pref_player_clear_disk_cache_summary">删除已缓存的 Emby 网络流数据</string>
   <string name="settings">设置</string>
   <string name="export_settings">导出设置</string>
   <string name="import_settings">导入设置</string>
   <string name="clear_config_cache">清除配置缓存</string>
   <string name="clear_thumbnail_cache">清除缩略图缓存</string>
   <string name="double_tap_seek_area_width">双击快进区域宽度</string>
-  <string name="autoplay_next_video">自动播放下一个视频</string>
   <string name="enable_next_previous_navigation">启用上一个 / 下一个导航</string>
   <string name="recently_played">最近播放</string>
   <string name="install">安装</string>
@@ -426,15 +400,6 @@
   <string name="player_control_rewind_10s">后退 %1$d 秒</string>
   <string name="player_control_forward_10s">前进 %1$d 秒</string>
   <string name="player_battery_percent">%1$d%%</string>
-  <string name="pref_media_source_pref_title">多版本优先选择</string>
-  <string name="pref_media_source_pref_summary">同一个影片有多个版本时，播放时自动按此规则挑选</string>
-  <string name="media_source_pref_default">跟随服务器默认版本</string>
-  <string name="media_source_pref_highest_resolution">分辨率越高越好</string>
-  <string name="media_source_pref_lowest_resolution">分辨率越低越省流量</string>
-  <string name="media_source_pref_highest_bitrate">码率越高越好</string>
-  <string name="media_source_pref_lowest_bitrate">码率越低越省流量</string>
-  <string name="media_source_pref_smallest_size">体积最小</string>
-  <string name="media_source_pref_best_quality_per_size">同画质选更小的</string>
   <string name="player_control_playback_speed">播放速度</string>
   <string name="player_control_slide_to_unlock">滑动解锁</string>
   <string name="player_control_back">返回</string>
@@ -490,8 +455,6 @@
   <!-- ===== 播放器「更多」面板 ===== -->
   <string name="player_engine_switch_unavailable">无法切换内核：没有可播放的地址</string>
 
-  <string name="player_toggle_autoplay_on">播完自动播放下一集</string>
-  <string name="player_toggle_autoplay_off">播完停在当前视频</string>
   <string name="player_toggle_close_eof">播完自动退出播放器</string>
   <string name="player_toggle_close_eof_on">播放结束回到列表</string>
   <string name="player_toggle_close_eof_off">播放结束留在播放器</string>
@@ -507,7 +470,6 @@
   <string name="i18n_mediainfo_analyzing">正在分析媒体文件…</string>
   <string name="i18n_auto_check_updates">自动检查更新</string>
   <string name="i18n_auto_pip_hint">按 Home 或返回键时自动进入画中画</string>
-  <string name="i18n_autoplay_next_video">自动播放下一集</string>
   <string name="i18n_folder_same">不能选择同一个文件夹</string>
   <string name="i18n_check_on_startup">启动时检查</string>
   <string name="i18n_clear_config_cache">清除配置缓存</string>
@@ -627,12 +589,6 @@
   <string name="i18n_ack_aboutlibraries_summary">生成本页里的开源许可清单。</string>
   <string name="i18n_ack_telephoto_summary">照片浏览器的捏合缩放 / 平移 / 双击放大手势。</string>
   <string name="i18n_ack_coil_summary">照片浏览器与照片网格的图片加载、采样与缓存层。</string>
-  <string name="pref_remember_subtitle_track_title">记住每部剧选择的字幕轨</string>
-  <string name="pref_remember_subtitle_track_summary_on">按「语言+编码」匹配，下一集自动选中同一条字幕轨</string>
-  <string name="pref_remember_subtitle_track_summary_off">每集都按默认语言规则选字幕</string>
-  <string name="pref_remember_global_speed_title">全局倍速记忆</string>
-  <string name="pref_remember_global_speed_summary_on">下一次播放沿用上次调过的倍速（每部剧的记忆优先）</string>
-  <string name="pref_remember_global_speed_summary_off">每次播放都用默认倍速</string>
   <string name="pref_auto_skip_intro_title">自动跳过片头</string>
   <string name="pref_auto_skip_intro_summary_on">有服务端片头标记时按标记跳；没有就按固定时长，起播后自动跳过开头一段</string>
   <string name="pref_auto_skip_intro_summary_off">播放头在片头区间时显示可点的「跳过片头」</string>
@@ -664,44 +620,6 @@
   <string name="danmaku_app_secret">应用密钥</string>
   <string name="danmaku_credential_hint">留空则不使用弹弹play官方数据（适用于自建弹幕服务）。填写后需在开放平台提交应用并审核通过。</string>
 
-  <!-- 应用锁（b7） -->
-  <string name="app_lock_title">应用锁</string>
-  <string name="app_lock_summary_off">未开启</string>
-  <string name="app_lock_summary_on">已开启</string>
-  <string name="app_lock_unlock_title">输入 PIN 码解锁</string>
-  <string name="app_lock_cooldown">尝试次数过多，请 %1$d 秒后再试</string>
-  <string name="app_lock_wrong_pin">PIN 码不正确</string>
-  <string name="app_lock_key_delete">删除</string>
-  <string name="app_lock_pin_setup_title">设置 PIN 码</string>
-  <string name="app_lock_pin_confirm_title">确认 PIN 码</string>
-  <string name="app_lock_pin_setup_hint">输入 4~6 位数字作为 PIN 码</string>
-  <string name="app_lock_pin_confirm_hint">再输入一遍以确认</string>
-  <string name="app_lock_pin_mismatch">两次输入不一致，请重新设置</string>
-  <string name="app_lock_pin_too_short">PIN 码至少需要 4 位</string>
-  <string name="app_lock_verify_title">验证 PIN 码</string>
-  <string name="app_lock_change_verify_hint">请输入当前 PIN 码以继续</string>
-  <string name="app_lock_manage_message">应用锁已开启。可以修改凭证、开关自动解锁，或验证后关闭。</string>
-  <string name="app_lock_change_pin">修改 PIN 码</string>
-  <string name="app_lock_disable">关闭应用锁</string>
-  <string name="app_lock_method_title">选择解锁方式</string>
-  <string name="app_lock_method_pin">数字 PIN</string>
-  <string name="app_lock_method_pin_desc">键盘输入 4~6 位数字</string>
-  <string name="app_lock_method_pattern">九宫格图案</string>
-  <string name="app_lock_method_pattern_desc">在 3×3 点阵上连接至少 4 个点</string>
-  <string name="app_lock_pattern_unlock_title">绘制图案解锁</string>
-  <string name="app_lock_pattern_setup_title">设置图案</string>
-  <string name="app_lock_pattern_confirm_title">再画一次</string>
-  <string name="app_lock_pattern_setup_hint">连接至少 4 个点</string>
-  <string name="app_lock_pattern_confirm_hint">再画一遍相同的图案</string>
-  <string name="app_lock_pattern_too_short">图案至少需要连接 4 个点</string>
-  <string name="app_lock_pattern_mismatch">两次图案不一致，请重新设置</string>
-  <string name="app_lock_wrong_pattern">图案不正确</string>
-  <string name="app_lock_change_pattern">修改图案</string>
-  <string name="app_lock_auto_unlock_title">密码正确自动解锁</string>
-  <string name="app_lock_auto_unlock_summary">PIN 输对即自动解锁，无需按确定键；图案松手即验证。</string>
-  <string name="app_lock_auto_unlock_hint">已开启自动解锁：输对即进</string>
-  <string name="app_lock_auto_unlock_badge">自动解锁</string>
-  <string name="app_lock_summary_on_format">已开启 · %1$s</string>
 
 
   <!-- 外观深度定制 -->

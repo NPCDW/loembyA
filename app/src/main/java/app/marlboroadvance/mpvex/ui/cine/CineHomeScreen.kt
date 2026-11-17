@@ -65,11 +65,6 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import app.marlboroadvance.mpvex.R
 import app.marlboroadvance.mpvex.domain.emby.EmbyItem
 import app.marlboroadvance.mpvex.domain.emby.EmbyServer
-import app.marlboroadvance.mpvex.preferences.BrowserPreferences
-// ⚠️ 两个 collectAsState 必须都在：项目自定义的 `Preference<T>.collectAsState()` 读偏好，
-//    Compose 的 `StateFlow<T>.collectAsState()` 读 StateFlow。只 import 后者时，
-//    `preferences.embyHomeShowMix`（Preference<Boolean>）会报「receiver type mismatch」。
-import app.marlboroadvance.mpvex.preferences.preference.collectAsState
 import app.marlboroadvance.mpvex.presentation.components.pullrefresh.PullRefreshBox
 import app.marlboroadvance.mpvex.ui.browser.emby.EmbyViewModel
 import app.marlboroadvance.mpvex.ui.browser.emby.openEmbyMediaCard
@@ -90,7 +85,6 @@ import app.marlboroadvance.mpvex.ui.cine.components.LocalCineHaze
 import app.marlboroadvance.mpvex.ui.cine.components.cineHazeSource
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import org.koin.compose.koinInject
 
 /**
  * Cine 首页。
@@ -140,10 +134,6 @@ fun CineHomeScreen(
   val error by viewModel.error.collectAsState()
   val mixItems by mixViewModel.mix.collectAsState()
 
-  val browserPreferences = koinInject<BrowserPreferences>()
-  val showHomeMix by browserPreferences.embyHomeShowMix.collectAsState()
-  val homeMixCount by browserPreferences.embyHomeMixCount.collectAsState()
-
   val wide = rememberCineWide()
   val space = CineTheme.space
   val screenHeight = rememberCineScreenHeightDp()
@@ -164,11 +154,11 @@ fun CineHomeScreen(
 
   // 「随便看看」：排在首页三请求之后（与 Classic 的取舍一致，避免抢服务端）
   val serverId = server?.id ?: 0L
-  LaunchedEffect(serverId, showHomeMix) {
-    if (!showHomeMix || serverId == 0L) return@LaunchedEffect
+  LaunchedEffect(serverId) {
+    if (serverId == 0L) return@LaunchedEffect
     val current = server ?: return@LaunchedEffect
     viewModel.awaitHomeLoaded()
-    mixViewModel.loadMix(current, seed = null, limit = homeMixCount)
+    mixViewModel.loadMix(current, seed = null, limit = SimilarRecommendationViewModel.HOME_MIX_COUNT)
   }
 
   // ── 展示模型（唯一映射入口在 CineItemMapper） ──
@@ -347,9 +337,7 @@ fun CineHomeScreen(
           onRefresh = {
             viewModel.refreshHomeAndWait()
             // 「随便看看」跟着一起换一批，否则下拉刷新后最底下一行还是旧内容
-            if (showHomeMix) {
-              server?.let { mixViewModel.loadMix(it, seed = null, limit = homeMixCount) }
-            }
+            server?.let { mixViewModel.loadMix(it, seed = null, limit = SimilarRecommendationViewModel.HOME_MIX_COUNT) }
           },
           modifier = Modifier.fillMaxSize(),
           listState = listState,
@@ -404,7 +392,7 @@ fun CineHomeScreen(
                 val heroVisible by remember { derivedStateOf { listState.firstVisibleItemIndex == 0 } }
 
                 // 手指按住期间暂停：只**观察**、绝不 consume，且走 Initial pass，
-                // HorizontalPager 与卡片点击层照常拿到完整事件（与视界流手势层同一口径）。
+                // HorizontalPager 与卡片点击层照常拿到完整事件（不影响子层的点击手势）。
                 var heroHolding by remember { mutableStateOf(false) }
                 val holdObserver = Modifier.pointerInput(Unit) {
                   awaitEachGesture {
@@ -546,7 +534,7 @@ fun CineHomeScreen(
               }
             }
 
-            if (showHomeMix && mixUi.isNotEmpty()) {
+            if (mixUi.isNotEmpty()) {
               item(key = "mix-head") {
                 Spacer(Modifier.height(space.sectionGap))
                 CineSectionHeader(
@@ -554,7 +542,9 @@ fun CineHomeScreen(
                   actionLabel = stringResource(R.string.cine_action_shuffle),
                   actionIcon = CineRefreshIcon,
                   onAction = {
-                    server?.let { mixViewModel.loadMix(it, seed = null, limit = homeMixCount) }
+                    server?.let {
+                      mixViewModel.loadMix(it, seed = null, limit = SimilarRecommendationViewModel.HOME_MIX_COUNT)
+                    }
                   },
                   contentPadding = PaddingValues(horizontal = space.screenH),
                 )

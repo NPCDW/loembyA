@@ -34,8 +34,7 @@ import androidx.compose.ui.unit.dp
  * （自动跳开着的时候不需要用户动手，见 `PlayerActivity.startSkipSegmentWatcher`）。
  * 点整条 = 跳到段尾；片尾的「段尾」就是视频结尾，等价于触发连播。
  *
- * 视觉上与连播倒计时卡（[AutoplayCountdownCard]）同一条设计线：
- * 半透明小胶囊、无强调色、无水波纹 —— 用户在专心看片，任何抢视觉的东西都是打扰。
+ * 半透明小胶囊、无强调色、无水波纹，避免干扰视频画面。
  */
 @Composable
 fun SkipSegmentChip(

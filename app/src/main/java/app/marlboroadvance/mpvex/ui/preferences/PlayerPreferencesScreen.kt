@@ -6,7 +6,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
-import androidx.compose.material.icons.outlined.PhotoLibrary
+import androidx.compose.material.icons.outlined.FastForward
+import androidx.compose.material.icons.outlined.LightMode
+import androidx.compose.material.icons.outlined.PictureInPictureAlt
+import androidx.compose.material.icons.outlined.SkipNext
+import androidx.compose.material.icons.outlined.Timer
+import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -14,65 +19,25 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material.icons.outlined.Audiotrack
-import androidx.compose.material.icons.outlined.Autorenew
-import androidx.compose.material.icons.outlined.BrightnessMedium
-import androidx.compose.material.icons.outlined.Crop
-import androidx.compose.material.icons.outlined.ExitToApp
-import androidx.compose.material.icons.outlined.FastForward
-import androidx.compose.material.icons.outlined.Gesture
-import androidx.compose.material.icons.outlined.LightMode
-import androidx.compose.material.icons.outlined.Notifications
-import androidx.compose.material.icons.outlined.PictureInPictureAlt
-import androidx.compose.material.icons.outlined.PlaylistPlay
-import androidx.compose.material.icons.outlined.Save
-import androidx.compose.material.icons.outlined.ScreenRotation
-import androidx.compose.material.icons.outlined.SkipNext
-import androidx.compose.material.icons.outlined.Speed
-import androidx.compose.material.icons.outlined.Storage
-import androidx.compose.material.icons.outlined.Straighten
-import androidx.compose.material.icons.outlined.Subtitles
-import androidx.compose.material.icons.outlined.Swipe
-import androidx.compose.material.icons.outlined.Timer
-import androidx.compose.material.icons.outlined.Tune
-import androidx.compose.material.icons.outlined.Visibility
-import androidx.compose.material.icons.outlined.VolumeUp
-import androidx.compose.material.icons.outlined.ZoomIn
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableLongStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
 import app.marlboroadvance.mpvex.R
 import app.marlboroadvance.mpvex.preferences.PlayerPreferences
 import app.marlboroadvance.mpvex.preferences.preference.collectAsState
 import app.marlboroadvance.mpvex.presentation.Screen
-import app.marlboroadvance.mpvex.presentation.components.ConfirmDialog
-import app.marlboroadvance.mpvex.ui.player.MpvDiskCache
-import app.marlboroadvance.mpvex.ui.player.controls.components.sheets.toFixed
+import app.marlboroadvance.mpvex.ui.player.PlayerControlAutoHidePolicy
 import app.marlboroadvance.mpvex.ui.utils.LocalBackStack
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import me.zhanghai.compose.preference.ListPreference
-import me.zhanghai.compose.preference.ListPreferenceType
-import me.zhanghai.compose.preference.Preference
 import me.zhanghai.compose.preference.ProvidePreferenceLocals
-import me.zhanghai.compose.preference.SliderPreference
 import me.zhanghai.compose.preference.SwitchPreference
 import org.koin.compose.koinInject
-import kotlin.math.roundToInt
 
 @Serializable
 object PlayerPreferencesScreen : Screen {
@@ -80,23 +45,22 @@ object PlayerPreferencesScreen : Screen {
   @Composable
   override fun Content() {
     val backstack = LocalBackStack.current
-    val context = LocalContext.current
     val preferences = koinInject<PlayerPreferences>()
     Scaffold(
       topBar = {
         TopAppBar(
-          title = { 
+          title = {
             Text(
-              text = stringResource(id = R.string.pref_player),
+              text = stringResource(R.string.pref_player),
               style = MaterialTheme.typography.headlineSmall,
               fontWeight = FontWeight.ExtraBold,
               color = MaterialTheme.colorScheme.primary,
-            ) 
+            )
           },
           navigationIcon = {
             IconButton(onClick = backstack::removeLastOrNull) {
               Icon(
-                Icons.AutoMirrored.Outlined.ArrowBack, 
+                Icons.AutoMirrored.Outlined.ArrowBack,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.secondary,
               )
@@ -115,75 +79,18 @@ object PlayerPreferencesScreen : Screen {
               .fillMaxSize()
               .padding(padding),
         ) {
-          // General Section
           item {
             PreferenceSectionHeader(title = "常规")
           }
-          
+
           item {
             PreferenceCard {
-              val savePositionOnQuit by preferences.savePositionOnQuit.collectAsState()
-              SwitchPreference(
-                icon = {
-                  Icon(
-                    Icons.Outlined.Save,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                  )
-                },
-                value = savePositionOnQuit,
-                onValueChange = preferences.savePositionOnQuit::set,
-                modifier = Modifier.settingsAnchor(R.string.pref_player_save_position_on_quit),
-                title = { Text(stringResource(R.string.pref_player_save_position_on_quit), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-              )
-              
-              PreferenceDivider()
-              
-              val closeAfterEndOfVideo by preferences.closeAfterReachingEndOfVideo.collectAsState()
-              SwitchPreference(
-                icon = {
-                  Icon(
-                    Icons.Outlined.ExitToApp,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                  )
-                },
-                value = closeAfterEndOfVideo,
-                onValueChange = preferences.closeAfterReachingEndOfVideo::set,
-                modifier = Modifier.settingsAnchor(R.string.pref_player_close_after_eof),
-                title = { Text(stringResource(id = R.string.pref_player_close_after_eof), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-              )
-              
-              PreferenceDivider()
-              
-              val autoplayNextVideo by preferences.autoplayNextVideo.collectAsState()
-              SwitchPreference(
-                icon = {
-                  Icon(
-                    Icons.Outlined.PlaylistPlay,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                  )
-                },
-                value = autoplayNextVideo,
-                onValueChange = preferences.autoplayNextVideo::set,
-                modifier = Modifier.settingsAnchor(R.string.i18n_autoplay_next_video),
-                title = { Text(text = stringResource(R.string.i18n_autoplay_next_video), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                summary = {
-                  Text(
-                    text = if (autoplayNextVideo)
-                      "Automatically play next video when current ends"
-                    else
-                      "Stay on current video when it ends",
-                    color = MaterialTheme.colorScheme.outline,
-                  )
-                },
-              )
-              
-              PreferenceDivider()
-
               val hideDelay by preferences.playerTimeToDisappear.collectAsState()
-              val hideDelayValues = listOf(500, 1_000, 1_500, 2_000, 2_500, 3_000, 3_500, 4_000, 4_500, 5_000)
+              val normalizedHideDelay = PlayerControlAutoHidePolicy.normalize(hideDelay)
+              val hideDelayLabels = mutableMapOf<Int, String>()
+              for (millis in PlayerControlAutoHidePolicy.VALUES) {
+                hideDelayLabels[millis] = playerControlHideDelayLabel(millis)
+              }
               ListPreference(
                 icon = {
                   Icon(
@@ -192,10 +99,10 @@ object PlayerPreferencesScreen : Screen {
                     tint = MaterialTheme.colorScheme.primary,
                   )
                 },
-                value = hideDelay.takeIf(hideDelayValues::contains) ?: 4_000,
+                value = normalizedHideDelay,
                 onValueChange = preferences.playerTimeToDisappear::set,
-                values = hideDelayValues,
-                valueToText = { AnnotatedString("$it ms") },
+                values = PlayerControlAutoHidePolicy.VALUES,
+                valueToText = { AnnotatedString(hideDelayLabels.getValue(it)) },
                 modifier = Modifier.settingsAnchor(R.string.pref_player_display_hide_player_control_time),
                 title = {
                   Text(
@@ -204,206 +111,7 @@ object PlayerPreferencesScreen : Screen {
                     overflow = TextOverflow.Ellipsis,
                   )
                 },
-                summary = { Text("$hideDelay ms") },
-              )
-
-              PreferenceDivider()
-
-              // 自动连播倒计时：0 = 播完直接切下一集（原来的行为）
-              val autoplayCountdown by preferences.autoplayNextCountdownSeconds.collectAsState()
-              ListPreference(
-                icon = {
-                  Icon(
-                    Icons.Outlined.Timer,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                  )
-                },
-                value = autoplayCountdown,
-                onValueChange = { preferences.autoplayNextCountdownSeconds.set(it) },
-                modifier = Modifier.settingsAnchor("连播下一集倒计时"),
-                title = { Text("连播下一集倒计时", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                values = listOf(0, 3, 5, 10),
-                valueToText = { value ->
-                  AnnotatedString(
-                    when (value) {
-                      0 -> "不显示，播完直接切"
-                      else -> "$value 秒"
-                    },
-                  )
-                },
-                type = ListPreferenceType.DROPDOWN_MENU,
-                summary = {
-                  Text(
-                    text = if (autoplayCountdown == 0) {
-                      "不显示，播完直接切"
-                    } else {
-                      "播完弹卡片，倒数 $autoplayCountdown 秒后切下一集；点卡片可立即播放"
-                    },
-                    color = MaterialTheme.colorScheme.outline,
-                  )
-                },
-              )
-
-              PreferenceDivider()
-
-              // 「下一集」悬停卡（片尾前约 30 秒）：与上面的倒计时是两件事 ——
-              // 那个是最后几秒催你「要切了」，这个是提前问「要不要接着看」。
-              val showNextUp by preferences.showNextUpCard.collectAsState()
-              SwitchPreference(
-                icon = {
-                  Icon(
-                    Icons.Outlined.SkipNext,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                  )
-                },
-                value = showNextUp,
-                onValueChange = preferences.showNextUpCard::set,
-                modifier = Modifier.settingsAnchor("片尾提示下一集"),
-                title = { Text("片尾提示下一集", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                summary = {
-                  Text(
-                    text = if (showNextUp) {
-                      "片尾前 ${preferences.nextUpShowSeconds.get()} 秒在右下角提示下一集，点一下立刻切"
-                    } else {
-                      "不提示，播完按连播设置自动切"
-                    },
-                    color = MaterialTheme.colorScheme.outline,
-                  )
-                },
-              )
-
-              if (showNextUp) {
-                val nextUpSec by preferences.nextUpShowSeconds.collectAsState()
-                ListPreference(
-                  icon = {
-                    Icon(
-                      Icons.Outlined.Timer,
-                      contentDescription = null,
-                      tint = MaterialTheme.colorScheme.primary,
-                    )
-                  },
-                  value = nextUpSec,
-                  onValueChange = { preferences.nextUpShowSeconds.set(it) },
-                  modifier = Modifier.settingsAnchor("提前多少秒提示"),
-                  title = { Text("提前多少秒提示", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                  values = listOf(15, 30, 60, 90),
-                  valueToText = { AnnotatedString("$it 秒") },
-                  type = ListPreferenceType.DROPDOWN_MENU,
-                  summary = {
-                    Text(
-                      text = "长片尾（带预告 / 片花）建议 60 秒以上",
-                      color = MaterialTheme.colorScheme.outline,
-                    )
-                  },
-                )
-              }
-
-              PreferenceDivider()
-
-              val rememberSpeed by preferences.rememberSpeedPerSeries.collectAsState()
-              SwitchPreference(
-                icon = {
-                  Icon(
-                    Icons.Outlined.Speed,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                  )
-                },
-                value = rememberSpeed,
-                onValueChange = preferences.rememberSpeedPerSeries::set,
-                modifier = Modifier.settingsAnchor("记住每部剧的播放速度"),
-                title = { Text("记住每部剧的播放速度", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                summary = {
-                  Text(
-                    text = if (rememberSpeed) {
-                      "同一部剧切下一集时沿用上次调过的倍速（电影按单部记）"
-                    } else {
-                      "每部片子都用默认倍速"
-                    },
-                    color = MaterialTheme.colorScheme.outline,
-                  )
-                },
-              )
-
-              PreferenceDivider()
-
-              val rememberAudioTrack by preferences.rememberAudioTrackPerSeries.collectAsState()
-              SwitchPreference(
-                icon = {
-                  Icon(
-                    Icons.Outlined.Audiotrack,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                  )
-                },
-                value = rememberAudioTrack,
-                onValueChange = preferences.rememberAudioTrackPerSeries::set,
-                modifier = Modifier.settingsAnchor("记住每部剧选择的音轨"),
-                title = { Text("记住每部剧选择的音轨", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                summary = {
-                  Text(
-                    text = if (rememberAudioTrack) {
-                      "按「语言+编码+声道」匹配，下一集自动选中同一条音轨"
-                    } else {
-                      "每集都按默认语言规则选音轨"
-                    },
-                    color = MaterialTheme.colorScheme.outline,
-                  )
-                },
-              )
-
-              PreferenceDivider()
-
-              val rememberSubtitleTrack by preferences.rememberSubtitleTrackPerSeries.collectAsState()
-              SwitchPreference(
-                icon = {
-                  Icon(
-                    Icons.Outlined.Subtitles,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                  )
-                },
-                value = rememberSubtitleTrack,
-                onValueChange = preferences.rememberSubtitleTrackPerSeries::set,
-                modifier = Modifier.settingsAnchor(R.string.pref_remember_subtitle_track_title),
-                title = { Text(text = stringResource(R.string.pref_remember_subtitle_track_title), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                summary = {
-                  Text(
-                    text = stringResource(
-                      if (rememberSubtitleTrack) R.string.pref_remember_subtitle_track_summary_on
-                      else R.string.pref_remember_subtitle_track_summary_off,
-                    ),
-                    color = MaterialTheme.colorScheme.outline,
-                  )
-                },
-              )
-
-              PreferenceDivider()
-
-              val rememberGlobalSpeed by preferences.rememberGlobalSpeed.collectAsState()
-              SwitchPreference(
-                icon = {
-                  Icon(
-                    Icons.Outlined.Speed,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                  )
-                },
-                value = rememberGlobalSpeed,
-                onValueChange = preferences.rememberGlobalSpeed::set,
-                modifier = Modifier.settingsAnchor(R.string.pref_remember_global_speed_title),
-                title = { Text(text = stringResource(R.string.pref_remember_global_speed_title), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                summary = {
-                  Text(
-                    text = stringResource(
-                      if (rememberGlobalSpeed) R.string.pref_remember_global_speed_summary_on
-                      else R.string.pref_remember_global_speed_summary_off,
-                    ),
-                    color = MaterialTheme.colorScheme.outline,
-                  )
-                },
+                summary = { Text(hideDelayLabels.getValue(normalizedHideDelay)) },
               )
 
               PreferenceDivider()
@@ -420,7 +128,13 @@ object PlayerPreferencesScreen : Screen {
                 value = autoSkipIntro,
                 onValueChange = preferences.autoSkipIntro::set,
                 modifier = Modifier.settingsAnchor(R.string.pref_auto_skip_intro_title),
-                title = { Text(text = stringResource(R.string.pref_auto_skip_intro_title), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                title = {
+                  Text(
+                    stringResource(R.string.pref_auto_skip_intro_title),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                  )
+                },
                 summary = {
                   Text(
                     text = stringResource(
@@ -446,131 +160,19 @@ object PlayerPreferencesScreen : Screen {
                 value = autoSkipOutro,
                 onValueChange = preferences.autoSkipOutro::set,
                 modifier = Modifier.settingsAnchor(R.string.pref_auto_skip_outro_title),
-                title = { Text(text = stringResource(R.string.pref_auto_skip_outro_title), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                title = {
+                  Text(
+                    stringResource(R.string.pref_auto_skip_outro_title),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                  )
+                },
                 summary = {
                   Text(
                     text = stringResource(
                       if (autoSkipOutro) R.string.pref_auto_skip_outro_summary_on
                       else R.string.pref_auto_skip_outro_summary_off,
                     ),
-                    color = MaterialTheme.colorScheme.outline,
-                  )
-                },
-              )
-
-              PreferenceDivider()
-
-              // Native disk buffering is temporary; shared demuxer limits control the playback window.
-              val diskCacheEnabled by preferences.diskCacheEnabled.collectAsState()
-              val scope = rememberCoroutineScope()
-              // -1 = 还没量过。跟「真的是 0 字节」区分开，否则第一次进页面
-              // 在清完缓存后会分不清该不该刷新显示。
-              var cacheBytes by remember { mutableLongStateOf(-1L) }
-              var showClearCache by remember { mutableStateOf(false) }
-              // 缓存占用要读磁盘，别在重组里同步扫目录 —— 只在进页面和清完之后刷新
-              LaunchedEffect(Unit) {
-                cacheBytes = withContext(Dispatchers.IO) { MpvDiskCache.sizeBytes(context) }
-              }
-
-              SwitchPreference(
-                icon = {
-                  Icon(
-                    Icons.Outlined.Storage,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                  )
-                },
-                value = diskCacheEnabled,
-                onValueChange = preferences.diskCacheEnabled::set,
-                modifier = Modifier.settingsAnchor(R.string.pref_player_disk_cache),
-                title = { Text(text = stringResource(R.string.pref_player_disk_cache), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                summary = {
-                  Text(
-                    text = stringResource(R.string.pref_player_disk_cache_summary),
-                    color = MaterialTheme.colorScheme.outline,
-                  )
-                },
-              )
-
-              PreferenceDivider()
-
-              Preference(
-                modifier = Modifier.settingsAnchor(R.string.pref_player_clear_disk_cache),
-                title = { Text(text = stringResource(R.string.pref_player_clear_disk_cache), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                summary = {
-                  Text(
-                    text = if (cacheBytes < 0L) {
-                      stringResource(R.string.pref_player_clear_disk_cache_summary)
-                    } else {
-                      stringResource(R.string.pref_player_clear_disk_cache_summary) +
-                        " · " + formatCacheBytes(cacheBytes)
-                    },
-                    color = MaterialTheme.colorScheme.outline,
-                  )
-                },
-                icon = {
-                  Icon(
-                    Icons.Outlined.PhotoLibrary,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                  )
-                },
-                onClick = { showClearCache = true },
-              )
-
-              if (showClearCache) {
-                ConfirmDialog(
-                  title = "清除播放缓存",
-                  subtitle = "将删除未使用的临时播放缓冲。此缓冲不支持离线播放或跨会话复用。",
-                  onConfirm = {
-                    showClearCache = false
-                    scope.launch {
-                      withContext(Dispatchers.IO) { MpvDiskCache.clear(context) }
-                      cacheBytes = withContext(Dispatchers.IO) { MpvDiskCache.sizeBytes(context) }
-                      android.widget.Toast
-                        .makeText(context, "已清除播放缓存", android.widget.Toast.LENGTH_SHORT)
-                        .show()
-                    }
-                  },
-                  onCancel = { showClearCache = false },
-                )
-              }
-
-              PreferenceDivider()
-
-              val rememberBrightness by preferences.rememberBrightness.collectAsState()
-              SwitchPreference(
-                icon = {
-                  Icon(
-                    Icons.Outlined.BrightnessMedium,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                  )
-                },
-                value = rememberBrightness,
-                onValueChange = preferences.rememberBrightness::set,
-                modifier = Modifier.settingsAnchor(R.string.pref_player_remember_brightness),
-                title = { Text(text = stringResource(R.string.pref_player_remember_brightness), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-              )
-
-              // 按剧记亮度：与上面那条**叠加**而不是替代（见 PlayerPreferences 的说明）。
-              // 放在紧跟它的位置，用户才能一眼看出「一个全局、一个按剧」。
-              val rememberSeriesBrightness by preferences.rememberSeriesBrightness.collectAsState()
-              SwitchPreference(
-                icon = {
-                  Icon(
-                    Icons.Outlined.BrightnessMedium,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                  )
-                },
-                value = rememberSeriesBrightness,
-                onValueChange = preferences.rememberSeriesBrightness::set,
-                modifier = Modifier.settingsAnchor(R.string.pref_player_remember_series_brightness),
-                title = { Text(text = stringResource(R.string.pref_player_remember_series_brightness), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                summary = {
-                  Text(
-                    text = stringResource(R.string.pref_player_remember_series_brightness_summary),
                     color = MaterialTheme.colorScheme.outline,
                   )
                 },
@@ -616,297 +218,22 @@ object PlayerPreferencesScreen : Screen {
                 title = { Text("暂停时保持屏幕常亮", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 summary = {
                   Text(
-                    text = if (keepScreenOnWhenPaused)
+                    text = if (keepScreenOnWhenPaused) {
                       "Screen stays awake while video is paused"
-                    else
-                      "Screen can turn off while video is paused",
-                    color = MaterialTheme.colorScheme.outline,
-                  )
-                },
-              )
-            }
-          }
-
-
-          // Seeking Section
-          item {
-            PreferenceSectionHeader(title = stringResource(R.string.pref_player_seeking_title))
-          }
-          
-          item {
-            PreferenceCard {
-              val usePreciseSeeking by preferences.usePreciseSeeking.collectAsState()
-              SwitchPreference(
-                icon = {
-                  Icon(
-                    Icons.Outlined.Straighten,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                  )
-                },
-                value = usePreciseSeeking,
-                onValueChange = preferences.usePreciseSeeking::set,
-                modifier = Modifier.settingsAnchor(R.string.pref_player_use_precise_seeking),
-                title = { Text(stringResource(R.string.pref_player_use_precise_seeking), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-              )
-              
-              PreferenceDivider()
-
-              val customSkipDuration by preferences.customSkipDuration.collectAsState()
-              SliderPreference(
-                icon = {
-                  Icon(
-                    Icons.Outlined.Timer,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                  )
-                },
-                value = customSkipDuration.toFloat(),
-                onValueChange = { preferences.customSkipDuration.set(it.roundToInt()) },
-                modifier = Modifier.settingsAnchor(R.string.pref_player_custom_skip_duration_title),
-                title = { Text(stringResource(R.string.pref_player_custom_skip_duration_title), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                valueRange = 5f..180f,
-                summary = {
-                   val summaryText = stringResource(R.string.pref_player_custom_skip_duration_summary)
-                   Text(
-                     "$summaryText ($customSkipDuration s)",
-                     color = MaterialTheme.colorScheme.outline,
-                   )
-                },
-                onSliderValueChange = { preferences.customSkipDuration.set(it.roundToInt()) },
-                sliderValue = customSkipDuration.toFloat(),
-              )
-            }
-          }
-          // Gestures Section
-          item {
-            PreferenceSectionHeader(title = stringResource(R.string.pref_player_gestures))
-          }
-          
-          item {
-            PreferenceCard {
-              val brightnessGesture by preferences.brightnessGesture.collectAsState()
-              SwitchPreference(
-                icon = {
-                  Icon(
-                    Icons.Outlined.BrightnessMedium,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                  )
-                },
-                value = brightnessGesture,
-                onValueChange = preferences.brightnessGesture::set,
-                modifier = Modifier.settingsAnchor(R.string.pref_player_gestures_brightness),
-                title = { Text(stringResource(R.string.pref_player_gestures_brightness), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-              )
-              
-              PreferenceDivider()
-              
-              val volumeGesture by preferences.volumeGesture.collectAsState()
-              SwitchPreference(
-                icon = {
-                  Icon(
-                    Icons.Outlined.VolumeUp,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                  )
-                },
-                value = volumeGesture,
-                onValueChange = preferences.volumeGesture::set,
-                modifier = Modifier.settingsAnchor(R.string.pref_player_gestures_volume),
-                title = { Text(stringResource(R.string.pref_player_gestures_volume), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-              )
-              
-              PreferenceDivider()
-              
-              val pinchToZoomGesture by preferences.pinchToZoomGesture.collectAsState()
-              SwitchPreference(
-                icon = {
-                  Icon(
-                    Icons.Outlined.ZoomIn,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                  )
-                },
-                value = pinchToZoomGesture,
-                onValueChange = preferences.pinchToZoomGesture::set,
-                modifier = Modifier.settingsAnchor(R.string.pref_player_gestures_pinch_to_zoom),
-                title = { Text(stringResource(R.string.pref_player_gestures_pinch_to_zoom), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-              )
-              
-              PreferenceDivider()
-              
-              val horizontalSwipeToSeek by preferences.horizontalSwipeToSeek.collectAsState()
-              SwitchPreference(
-                icon = {
-                  Icon(
-                    Icons.Outlined.Swipe,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                  )
-                },
-                value = horizontalSwipeToSeek,
-                onValueChange = preferences.horizontalSwipeToSeek::set,
-                modifier = Modifier.settingsAnchor(R.string.pref_player_gestures_horizontal_swipe_to_seek),
-                title = { Text(stringResource(R.string.pref_player_gestures_horizontal_swipe_to_seek), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-              )
-              
-              PreferenceDivider()
-              
-              val horizontalSwipeSensitivity by preferences.horizontalSwipeSensitivity.collectAsState()
-              SliderPreference(
-                icon = {
-                  Icon(
-                    Icons.Outlined.Tune,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                  )
-                },
-                value = horizontalSwipeSensitivity,
-                onValueChange = { preferences.horizontalSwipeSensitivity.set(it.toFixed(3)) },
-                modifier = Modifier.settingsAnchor(R.string.pref_player_gestures_horizontal_swipe_sensitivity),
-                title = { Text(stringResource(R.string.pref_player_gestures_horizontal_swipe_sensitivity), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                valueRange = 0.020f..0.1f,
-                summary = {
-                  val sensitivityPercent = (horizontalSwipeSensitivity * 1000).toInt()
-                  Text(
-                    "Current: ${sensitivityPercent}/100 (${if (sensitivityPercent < 30) "Low" else if (sensitivityPercent < 55) "Medium" else "High"})",
-                    color = MaterialTheme.colorScheme.outline,
-                  )
-                },
-                onSliderValueChange = { preferences.horizontalSwipeSensitivity.set(it.toFixed(3)) },
-                sliderValue = horizontalSwipeSensitivity,
-              )
-
-              PreferenceDivider()
-
-              // 震动反馈总开关（issue 反馈新增）。
-              // 放在「手势」卡里、紧跟横滑快进与灵敏度 —— 震动就是这条手势的配套反馈，
-              // 放在这里用户能一眼看出「它管的是滑动时的手感」。
-              // 总开关而非只管快进：马达强弱因人而异，给一个一键全关的出口比逐项关更实际。
-              val hapticFeedbackEnabled by preferences.hapticFeedbackEnabled.collectAsState()
-              SwitchPreference(
-                icon = {
-                  Icon(
-                    Icons.Outlined.Notifications,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                  )
-                },
-                value = hapticFeedbackEnabled,
-                onValueChange = preferences.hapticFeedbackEnabled::set,
-                modifier = Modifier.settingsAnchor(R.string.pref_player_haptic_feedback),
-                title = { Text(stringResource(R.string.pref_player_haptic_feedback), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                summary = {
-                  Text(
-                    text = stringResource(R.string.pref_player_haptic_feedback_summary),
-                    color = MaterialTheme.colorScheme.outline,
-                  )
-                },
-              )
-              
-              PreferenceDivider()
-              
-              val holdForMultipleSpeed by preferences.holdForMultipleSpeed.collectAsState()
-              SliderPreference(
-                icon = {
-                  Icon(
-                    Icons.Outlined.Speed,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                  )
-                },
-                value = holdForMultipleSpeed,
-                onValueChange = { preferences.holdForMultipleSpeed.set(it.toFixed(2)) },
-                modifier = Modifier.settingsAnchor(R.string.pref_player_gestures_hold_for_multiple_speed),
-                title = { Text(stringResource(R.string.pref_player_gestures_hold_for_multiple_speed), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                valueRange = 0f..6f,
-                summary = {
-                  Text(
-                    if (holdForMultipleSpeed == 0F) {
-                      stringResource(R.string.generic_disabled)
                     } else {
-                      "%.2fx".format(holdForMultipleSpeed)
+                      "Screen can turn off while video is paused"
                     },
                     color = MaterialTheme.colorScheme.outline,
                   )
                 },
-                onSliderValueChange = { preferences.holdForMultipleSpeed.set(it.toFixed(2)) },
-                sliderValue = holdForMultipleSpeed,
-              )
-              
-              PreferenceDivider()
-              
-              val showDynamicSpeedOverlay by preferences.showDynamicSpeedOverlay.collectAsState()
-              SwitchPreference(
-                icon = {
-                  Icon(
-                    Icons.Outlined.Speed,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                  )
-                },
-                value = showDynamicSpeedOverlay,
-                onValueChange = preferences.showDynamicSpeedOverlay::set,
-                modifier = Modifier.settingsAnchor("动态倍速浮层"),
-                title = { Text("动态倍速浮层", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                summary = { 
-                  Text(stringResource(R.string.i18n_speed_overlay_hint),
-                    color = MaterialTheme.colorScheme.outline,
-                  ) 
-                }
               )
             }
-          }
-          // Controls Section
-          item {
-            PreferenceSectionHeader(title = stringResource(R.string.pref_player_controls))
           }
 
           item {
-            PreferenceCard {
-              val allowGesturesInPanels by preferences.allowGesturesInPanels.collectAsState()
-              SwitchPreference(
-                icon = {
-                  Icon(
-                    Icons.Outlined.Gesture,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                  )
-                },
-                value = allowGesturesInPanels,
-                onValueChange = preferences.allowGesturesInPanels::set,
-                modifier = Modifier.settingsAnchor(R.string.pref_player_controls_allow_gestures_in_panels),
-                title = {
-                  Text(
-                    text = stringResource(id = R.string.pref_player_controls_allow_gestures_in_panels),
-                  )
-                },
-              )
-              
-              PreferenceDivider()
-              
-              val showLoadingCircle by preferences.showLoadingCircle.collectAsState()
-              SwitchPreference(
-                icon = {
-                  Icon(
-                    Icons.Outlined.Autorenew,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                  )
-                },
-                value = showLoadingCircle,
-                onValueChange = preferences.showLoadingCircle::set,
-                modifier = Modifier.settingsAnchor(R.string.pref_player_controls_show_loading_circle),
-                title = { Text(stringResource(R.string.pref_player_controls_show_loading_circle), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-              )
-            }
-          }
-          // Display Section
-          item {
             PreferenceSectionHeader(title = stringResource(R.string.pref_player_display))
           }
-          
+
           item {
             PreferenceCard {
               val showSystemStatusBar by preferences.showSystemStatusBar.collectAsState()
@@ -921,7 +248,13 @@ object PlayerPreferencesScreen : Screen {
                 value = showSystemStatusBar,
                 onValueChange = preferences.showSystemStatusBar::set,
                 modifier = Modifier.settingsAnchor(R.string.pref_player_display_show_status_bar),
-                title = { Text(stringResource(R.string.pref_player_display_show_status_bar), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                title = {
+                  Text(
+                    stringResource(R.string.pref_player_display_show_status_bar),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                  )
+                },
               )
 
               PreferenceDivider()
@@ -940,31 +273,6 @@ object PlayerPreferencesScreen : Screen {
                 modifier = Modifier.settingsAnchor("显示控件时显示导航栏"),
                 title = { Text("显示控件时显示导航栏", maxLines = 1, overflow = TextOverflow.Ellipsis) },
               )
-              
-              PreferenceDivider()
-              
-              // 自动裁黑边（cropdetect）：mpv 专属，探测有几百毫秒开销 + 可能误裁，
-              // 所以默认关闭、放在这里由用户自己决定
-              val autoCropBlackBars by preferences.autoCropBlackBars.collectAsState()
-              SwitchPreference(
-                icon = {
-                  Icon(
-                    Icons.Outlined.Crop,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                  )
-                },
-                value = autoCropBlackBars,
-                onValueChange = preferences.autoCropBlackBars::set,
-                modifier = Modifier.settingsAnchor(R.string.pref_auto_crop_black_bars_title),
-                title = { Text(stringResource(R.string.pref_auto_crop_black_bars_title), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                summary = {
-                  Text(
-                    stringResource(R.string.pref_auto_crop_black_bars_summary),
-                    color = MaterialTheme.colorScheme.outline,
-                  )
-                },
-              )
             }
           }
         }
@@ -972,3 +280,12 @@ object PlayerPreferencesScreen : Screen {
     }
   }
 }
+
+@Composable
+private fun playerControlHideDelayLabel(millis: Int): String =
+  if (millis == PlayerControlAutoHidePolicy.NEVER) {
+    stringResource(R.string.pref_player_control_hide_never)
+  } else {
+    val seconds = millis / 1_000
+    pluralStringResource(R.plurals.seconds, seconds, seconds)
+  }

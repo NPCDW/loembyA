@@ -61,24 +61,23 @@ Emby 会话上报 + 共享播放历史 + 可选第三方同步
 
 共享配置中的普通 HTTP/HTTPS/SOCKS 正向代理会被 Android 忽略。`reverse_proxy_server` 支持 Emby 的服务器反向路由，以及 `app_reverse_proxy_id`、`trakt_reverse_proxy_id`、`simkl_reverse_proxy_id`、`yamtrack_reverse_proxy_id` 对应的应用数据/图标/更新和追踪服务线路。Android 只读取所选反代，不修改共享配置；失效引用不会静默退回直连。
 
-缓存窗口由共享 PostgreSQL 的前向/回看缓存配置和所选版本码率计算，文件总大小不是缓存目标。播放器不额外限制为固定 45 秒预读；进度条以 native 当前可寻址缓存范围为准，回看缓存被丢弃后也会更新。可选“临时磁盘缓冲”只在当前播放中使用，关闭后释放，不提供离线播放或跨会话复用，也没有独立的物理磁盘占用上限。
+缓存窗口由共享 PostgreSQL 的前向/回看缓存配置和所选版本码率计算，文件总大小不是缓存目标。播放器不额外限制为固定 45 秒预读；进度条以 native 当前可寻址缓存范围为准，回看缓存被丢弃后也会更新。播放缓冲只使用内存，不启用临时磁盘缓冲，也不提供离线播放或跨会话复用。
 
 ## 当前功能
 
 - 从共享 PostgreSQL 读取并选择多个 Emby 服务器；共享 Token 失效时可在当前进程内重新登录，不回写共享凭据；
-- Emby 主页、媒体库、文件夹下钻、继续观看、最新内容、推荐与随机浏览；
+- Emby 主页、媒体库、文件夹下钻、继续观看、最新内容与推荐；
 - 服务器内搜索和跨服务器聚合搜索，本机保存搜索历史；
 - 排序、筛选、分页、中文字幕路径筛选和多种卡片呈现；
 - Movie / Episode 收藏与已看状态操作；
 - 只读合集、相似推荐和 Instant Mix；
-- 照片相册、分页网格、缩放、旋转、幻灯片、胶片条和 EXIF 信息；
+- 照片相册、分页网格、缩放、旋转、手动幻灯片和 EXIF 信息；
 - 内置 mpv 播放、剧集队列、断点续播、版本选择、音轨和字幕选择、手势、画中画、后台媒体会话、Anime4K 与弹幕；
-- Emby 媒体竖向连播视界流；
 - Emby `/Sessions/Playing`、`/Progress`、`/Stopped` 播放会话上报；
 - 共享 PostgreSQL 播放历史、累计播放时长以及 pin / hide / ordinary 标记循环；
 - 可选 Trakt、Simkl、YamTrack 播放同步；
 - 桌面“继续观看”小组件；
-- PIN / 图案应用锁，以及本机崩溃记录页面；
+- 本机崩溃记录页面；
 - 独立 MediaInfo 分析器。
 
 ## 不包含的功能
@@ -210,9 +209,8 @@ adb -s <serial> install -r <apk-path>
 - `danger_accept_invalid_certs` 会进一步关闭 TLS 证书和主机名校验，仅应在明确知情时启用；
 - 启用后，Trakt、Simkl、YamTrack、弹幕和 standard flavor 更新器会访问各自服务；
 - 正向代理服务器设置及其凭据不会被 Android 读取或使用；启用的反代会接收其对应服务的请求（追踪 token、Webhook 等也经过该线路），只应选择可信反代；
-- 应用锁主要用于防止随手打开或儿童误操作，不是高强度加密边界；
 - 崩溃报告保存在本机，不会自动上传；
-- 播放器和视界流 Activity 不导出；MediaInfo 分析器会响应系统 SEND / VIEW 请求，但不会进入播放流程。
+- 播放器 Activity 不导出；MediaInfo 分析器会响应系统 SEND / VIEW 请求，但不会进入播放流程。
 
 ## 目录结构
 
@@ -229,10 +227,9 @@ app/src/main/java/app/marlboroadvance/mpvex/
 ├── ui/
 │   ├── browser/emby/  # Emby 浏览与 Classic 页面
 │   ├── cine/          # Cine 呈现风格
-│   ├── player/        # 内部播放器、视界流和本地 loopback 集成
+│   ├── player/        # 内部播放器和本地 loopback 集成
 │   ├── postgres/      # PostgreSQL 首次配置门
 │   ├── preferences/   # 设置与只读共享配置
-│   ├── lock/          # 应用锁
 │   └── mediainfo/     # 独立 MediaInfo 分析器
 └── widget/            # 继续观看小组件
 ```

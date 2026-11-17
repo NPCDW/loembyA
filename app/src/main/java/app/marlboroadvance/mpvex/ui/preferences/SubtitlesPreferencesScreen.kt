@@ -2,19 +2,16 @@ package app.marlboroadvance.mpvex.ui.preferences
 
 import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.documentfile.provider.DocumentFile
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
@@ -57,18 +54,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
-import me.zhanghai.compose.preference.Preference
 import me.zhanghai.compose.preference.ProvidePreferenceLocals
 import me.zhanghai.compose.preference.SwitchPreference
 import me.zhanghai.compose.preference.TextFieldPreference
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.TextButton
 import androidx.compose.material.icons.outlined.AspectRatio
 import androidx.compose.material.icons.outlined.ClosedCaption
 import androidx.compose.material.icons.outlined.Language
-import androidx.compose.material.icons.outlined.Subtitles
-import android.net.Uri
 import org.koin.compose.koinInject
 
 @Serializable
@@ -209,29 +200,6 @@ object SubtitlesPreferencesScreen : Screen {
                 },
               )
               
-              PreferenceDivider()
-
-              val autoload by preferences.autoloadMatchingSubtitles.collectAsState()
-              SwitchPreference(
-                icon = {
-                  Icon(
-                    Icons.Outlined.Subtitles,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                  )
-                },
-                value = autoload,
-                onValueChange = { preferences.autoloadMatchingSubtitles.set(it) },
-                modifier = Modifier.settingsAnchor(R.string.pref_subtitles_autoload_title),
-                title = { Text(stringResource(R.string.pref_subtitles_autoload_title), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                summary = {
-                  Text(
-                    stringResource(R.string.pref_subtitles_autoload_summary),
-                    color = MaterialTheme.colorScheme.outline,
-                  )
-                },
-              )
-
               PreferenceDivider()
 
               val overrideAss by preferences.overrideAssSubs.collectAsState()

@@ -38,18 +38,3 @@ fun EmbyItem.primaryImageRef(): EmbyPrimaryImageRef? {
   if (owner != null) return EmbyPrimaryImageRef(owner, PrimaryImageTag)
   return EmbyPrimaryImageRef(selfId, null)
 }
-
-/**
- * 该条目的主图是否「借」在别的条目上（相册 / 部分文件夹 —— 服务端会把内部第一条媒体的图
- * 挂成容器的预览图，归属写在 [EmbyItem.PrimaryImageItemId] 上）。
- *
- * ⚠️ **不要拿它去决定「这个文件夹要不要拼宫格封面」。** 曾经在
- * `needsFolderMosaic` 里用过一条 `!hasBorrowedPrimaryImage()` 的豁免，真机现象是
- * 「同是视频文件夹，有的四宫格、有的一整张缩略图」：被服务端借了图的那些文件夹
- * 会整条跳过拼图、直接显示借来的那**一张**（也就是它内部第一个视频的一帧）。
- * 详细根因与被误伤的范围写在 `EmbyLibraryScreen.needsFolderMosaic` 的 KDoc 里。
- *
- * 现仅作为一个语义谓词保留（判断「这张脸是不是借来的」），当前无调用点。
- */
-fun EmbyItem.hasBorrowedPrimaryImage(): Boolean =
-  ImageTags["Primary"] == null && !PrimaryImageItemId.isNullOrBlank()

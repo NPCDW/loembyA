@@ -292,19 +292,8 @@ class PagedList<T>(
     private const val MAX_FILTERED_PAGES = 50
     const val DEFAULT_PAGE_SIZE = 100
 
-    /**
-     * 触底预取距离（**预测性懒加载「开」**）：距列表末尾还剩几格就开始拉下一页。
-     * 12 格 ≈ 3 列网格 4 行 / 单列列表约一屏半 —— 数据到得比用户滚到得快，
-     * 快速fling 也覆盖得住。
-     *
-     * ⚠️ 不是唯一距离：设置里的「预测性懒加载」开关（`BrowserPreferences.embyPredictivePreload`）
-     * 关时用 [PREFETCH_DISTANCE_OFF]。各页面一律通过
-     * `rememberPredictivePreloadDistance(browserPreferences)` 取值，不要硬编码。
-     */
-    const val PREFETCH_DISTANCE = 12
-
-    /** 预测性懒加载「关」：贴近末尾才拉下一页（≈ 滑到才加载的老行为，最省请求） */
-    const val PREFETCH_DISTANCE_OFF = 2
+    /** Load the next page only near the end, with two rendered positions remaining. */
+    const val PREFETCH_DISTANCE = 2
   }
 }
 

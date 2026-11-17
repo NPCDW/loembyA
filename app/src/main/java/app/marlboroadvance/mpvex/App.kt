@@ -6,6 +6,8 @@ import androidx.preference.PreferenceManager
 import app.marlboroadvance.mpvex.di.DatabaseModule
 import app.marlboroadvance.mpvex.di.FileManagerModule
 import app.marlboroadvance.mpvex.di.PreferencesModule
+import app.marlboroadvance.mpvex.di.PlayerModule
+import app.marlboroadvance.mpvex.preferences.LegacyPlaybackCacheCleanup
 import app.marlboroadvance.mpvex.preferences.LegacyPlayerPreferenceCleanup
 import app.marlboroadvance.mpvex.presentation.crash.CrashActivity
 import app.marlboroadvance.mpvex.presentation.crash.GlobalExceptionHandler
@@ -69,6 +71,7 @@ class App : Application() {
     val plan = LegacyPlayerPreferenceCleanup.plan(preferences.all) ?: return
     val editor = preferences.edit()
     plan.decoderModeToSeed?.let { editor.putString(LegacyPlayerPreferenceCleanup.DECODER_MODE_KEY, it) }
+    plan.controlsHideMillisToSeed?.let { editor.putInt(LegacyPlayerPreferenceCleanup.CONTROLS_HIDE_KEY, it) }
     plan.keysToRemove.forEach(editor::remove)
     editor.putInt(LegacyPlayerPreferenceCleanup.MARKER_KEY, plan.markerVersion)
     // Synchronous by design: Koin starts immediately after this method returns.
@@ -99,6 +102,7 @@ class App : Application() {
         modules(
           PreferencesModule,
           DatabaseModule,
+          PlayerModule,
           FileManagerModule,
           app.marlboroadvance.mpvex.di.domainModule,
         )
@@ -123,6 +127,11 @@ class App : Application() {
 
     // Emby 封面图的磁盘缓存层（下载后 30 天新鲜期 / 上限 256MB，读取不续期）
     app.marlboroadvance.mpvex.ui.browser.emby.components.EmbyImageLoader.init(this)
+    applicationScope.launch(Dispatchers.IO) {
+      val roots = listOf(cacheDir) + externalCacheDirs.filterNotNull()
+      runCatching { LegacyPlaybackCacheCleanup.removeFrom(roots) }
+        .onFailure { Log.w("StartupTrace", "Legacy stream cache cleanup failed: ${it.javaClass.simpleName}") }
+    }
 
     // FastThumbnails 会加载 native 库（libmpv 等），在某些设备/ABI 上可能原生崩溃或抛 UnsatisfiedLinkError。
     // 用 try/catch 包住：即便它失败也只是视频缩略图不可用，绝不该把整个启动砸死。

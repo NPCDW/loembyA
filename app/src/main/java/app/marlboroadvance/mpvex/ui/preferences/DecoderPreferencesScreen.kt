@@ -1,12 +1,9 @@
 package app.marlboroadvance.mpvex.ui.preferences
 
 import android.content.Context
-import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Build
 import android.util.Log
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -26,7 +23,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.BlurOn
 import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.ColorLens
@@ -46,7 +42,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import app.marlboroadvance.mpvex.R
 import app.marlboroadvance.mpvex.preferences.DecoderPreferences
@@ -58,7 +53,6 @@ import app.marlboroadvance.mpvex.ui.player.DefaultDecoder
 import app.marlboroadvance.mpvex.ui.player.MPVProfile
 import app.marlboroadvance.mpvex.ui.player.PlaybackColorPolicy
 import app.marlboroadvance.mpvex.ui.utils.LocalBackStack
-import app.marlboroadvance.mpvex.ui.preferences.VulkanUtils
 import kotlinx.serialization.Serializable
 import me.zhanghai.compose.preference.ListPreference
 import me.zhanghai.compose.preference.ProvidePreferenceLocals
@@ -415,41 +409,6 @@ object DecoderPreferencesScreen : Screen {
                     stringResource(R.string.pref_decoder_yuv420p_summary),
                     color = MaterialTheme.colorScheme.outline,
                   )
-                },
-              )
-
-              PreferenceDivider()
-              
-              val enableAnime4K by preferences.enableAnime4K.collectAsState()
-              SwitchPreference(
-                icon = {
-                  Icon(
-                    Icons.Outlined.AutoAwesome,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                  )
-                },
-                value = enableAnime4K,
-                onValueChange = preferences.enableAnime4K::set,
-                modifier = Modifier.settingsAnchor(R.string.pref_anime4k_title),
-                title = { Text(stringResource(R.string.pref_anime4k_title), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                summary = {
-                  Column {
-                    Text(
-                      stringResource(R.string.pref_anime4k_summary),
-                      color = MaterialTheme.colorScheme.outline,
-                    )
-                    Text(
-                      text = "github.com/bloc97/Anime4K",
-                      color = MaterialTheme.colorScheme.primary,
-                      style = MaterialTheme.typography.bodySmall,
-                      textDecoration = TextDecoration.Underline,
-                      modifier = Modifier.clickable {
-                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/bloc97/Anime4K"))
-                        context.startActivity(intent)
-                      }
-                    )
-                  }
                 },
               )
             }

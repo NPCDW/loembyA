@@ -207,11 +207,6 @@ fun EmbyHomeScreen(
   val browserPreferences = koinInject<BrowserPreferences>()
   val serverId = server?.id ?: 0L
 
-  // 「随便看看」区块的显示开关与条数。默认值见 BrowserPreferences。
-  // 关掉时下面那次推荐请求也一起停（LaunchedEffect 的 key 里带了 showHomeMix）。
-  val showHomeMix by browserPreferences.embyHomeShowMix.collectAsState()
-  val homeMixCount by browserPreferences.embyHomeMixCount.collectAsState()
-
   val pinsPreference = remember(serverId) { browserPreferences.embyLibraryPins(serverId) }
   val numbersPreference = remember(serverId) { browserPreferences.embyLibraryNumbers(serverId) }
   val hiddenPreference = remember(serverId) { browserPreferences.embyHiddenLibraries(serverId) }
@@ -246,22 +241,12 @@ fun EmbyHomeScreen(
     }
   }
 
-  // 拉「随便看看」那一批。
-  // 只跟服务器 id 走：下拉刷新不再重复拉这一批（首页本来就有三个区块在刷），
-  // 想换内容点区块标题上的「换一批」即可。
-  // ⚠️ `showHomeMix` 进 key：用户在设置里关掉这个开关后，这里要**立刻停掉请求**，
-  // 不是「下次进首页才生效」。所以开关是 LaunchedEffect 的 key 之一，
-  // 关掉时 effect 重跑并在第一行就 return。
-  // 排在首页三请求**之后**（2026-10-15）：这一行横滑在页面最底部，用户得滚好久
-  // 才看得见，没道理跟「媒体库 / 继续观看 / 最新加入」抢服务端。十万级条目的库上
-  // 每一发都可能是数百毫秒到数秒，四发同时打过去只会让首屏更晚出来
-  // （详见 EmbyViewModel.loadHome / awaitHomeLoaded 的说明）。
-  LaunchedEffect(serverId, showHomeMix) {
-    if (!showHomeMix) return@LaunchedEffect
+  // Keep home sampling after the core home requests; refreshing this row remains an explicit action.
+  LaunchedEffect(serverId) {
     val current = server ?: return@LaunchedEffect
     if (serverId == 0L) return@LaunchedEffect
     viewModel.awaitHomeLoaded()
-    mixViewModel.loadMix(current, seed = null, limit = homeMixCount)
+    mixViewModel.loadMix(current, seed = null, limit = SimilarRecommendationViewModel.HOME_MIX_COUNT)
   }
 
   Column(modifier = Modifier.fillMaxSize()) {
@@ -297,8 +282,6 @@ fun EmbyHomeScreen(
         //   切服务器在服务器管理页里本来就能做，而顶栏每个图标都在挤压标题里的
         //   **服务器名称**（用户反馈「服务器名称都放不下了」）⇒ 不如把这个位置还给标题。
         //   需要切换时：Emby 维护 → 服务器管理。
-        // 下载管理：有任务在跑时角标显示数量。
-        // 高频（用户在下载页和首页之间来回切），所以留在顶栏不进「更多」。
         // Emby 维护：用官方 Emby 图标（品牌绿），与下方齿轮明确区分。
         // 同理常驻顶栏 —— 服务器掉线、认证过期、任务异常都得从这里处理。
         // **长按**这个图标弹「媒体库显示」小菜单（勾选决定首页媒体库横滑里显示哪些）。
@@ -495,8 +478,7 @@ fun EmbyHomeScreen(
             // 「随便看看」：即混的一批，不占独立页也能有点击。
             // 放在「最新加入」下面 —— 那块是「刚出的新片」，这块是「点开就有惊喜」，
             // 语义不重复。整块只给一行横滑，点卡片进详情，点标题右侧按钮换一批。
-            // `showHomeMix &&` 是设置里那个开关：关掉时整块消失（请求也已经停了）。
-            if (showHomeMix && mixItems.isNotEmpty()) {
+            if (mixItems.isNotEmpty()) {
               item {
                 EmbySectionHeader(
                   title = stringResource(R.string.emby_section_mix),
@@ -507,9 +489,9 @@ fun EmbyHomeScreen(
                     ) {
                       SectionActionPill(onClick = {
                         val current = server ?: return@SectionActionPill
-                        // 换一批沿用当前条数设置，不然用户设了 12 条、
-                        // 点一下「换一批」突然变成 100 条，视觉上像是坏了
-                        mixViewModel.loadMix(current, seed = null, limit = homeMixCount)
+                        mixViewModel.loadMix(
+                          current, seed = null, limit = SimilarRecommendationViewModel.HOME_MIX_COUNT,
+                        )
                       }) { Text(stringResource(R.string.emby_action_refresh_batch)) }
                       SectionActionPill(onClick = onOpenDiscover) {
                         Text(stringResource(R.string.emby_action_more))

@@ -48,8 +48,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import org.koin.compose.koinInject
-import kotlin.math.ceil
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -65,14 +63,12 @@ import app.marlboroadvance.mpvex.domain.anime4k.Anime4KManager
 import app.marlboroadvance.mpvex.domain.anime4k.Anime4KRuntimeDecision
 import app.marlboroadvance.mpvex.domain.anime4k.Anime4KRuntimePolicy
 import app.marlboroadvance.mpvex.domain.anime4k.Anime4KRuntimeState
-import app.marlboroadvance.mpvex.domain.playbackstate.repository.PlaybackStateRepository
 import app.marlboroadvance.mpvex.preferences.AdvancedPreferences
 import app.marlboroadvance.mpvex.preferences.AudioPreferences
 import app.marlboroadvance.mpvex.preferences.BrowserPreferences
 import app.marlboroadvance.mpvex.preferences.DecoderPreferences
 import app.marlboroadvance.mpvex.preferences.PlayerPreferences
 import app.marlboroadvance.mpvex.preferences.SubtitlesPreferences
-import app.marlboroadvance.mpvex.preferences.preference.collectAsState
 import app.marlboroadvance.mpvex.ui.player.controls.PlayerControls
 import app.marlboroadvance.mpvex.ui.player.danmaku.DanmakuRenderParams
 import app.marlboroadvance.mpvex.ui.theme.MpvexTheme
@@ -134,10 +130,8 @@ open class PlayerActivity :
 
   // ==================== Dependency Injection ====================
 
-  /**
-   * Repository for managing playback state.
-   */
-  private val playbackStateRepository: PlaybackStateRepository by inject()
+  /** App-level serial local writer; queued snapshots survive Activity teardown. */
+  private val playbackStateWriter: LocalPlaybackStateWriter by inject()
 
   /**
    * Preferences for player settings.
@@ -189,6 +183,8 @@ open class PlayerActivity :
   private val loembyTransport: LoembyMpvTransport = object : LoembyMpvTransport {
     override fun command(vararg args: String) = PlayerLib.command(*args)
     override fun replaceCurrentPlaylistEntry(url: String) {
+      saveVideoPlaybackState()
+      playbackRestoreJob?.cancel()
       nativePlaylist.replaceCurrent(playlistIndex, url)
     }
     override fun getDouble(name: String) = PlayerLib.getPropertyDouble(name)
@@ -219,6 +215,11 @@ open class PlayerActivity :
         intent.putStringArrayListExtra("emby_media_source_id", ArrayList(sources))
         intent.putStringArrayListExtra("emby_media_source_names", ArrayList(names))
         viewModel.subtitleServer = state.spec.server
+        if (loadedPlaybackIdentity?.url == state.url &&
+          loopback.ownsMediaUrl(state.url, PlayerLib.getPropertyString("path"))
+        ) {
+          loadedPlaybackIdentity = playbackIdentity(state.url)
+        }
       }
     }
     override fun onError(message: String) {
@@ -234,13 +235,6 @@ open class PlayerActivity :
         }
       }
     }
-  }
-
-  /**
-   * Track selector for automatic audio/subtitle selection
-   */
-  private val trackSelector: TrackSelector by lazy {
-    TrackSelector(audioPreferences, subtitlesPreferences)
   }
 
   // ==================== Views ====================
@@ -266,8 +260,8 @@ open class PlayerActivity :
   /**
    * 弹幕状态（加载 / 匹配 / 过滤）。
    *
-   * 只在 mpv 播放页存在；视界流不接（弹幕跟随 mpv 的
-   * `time-pos`，换内核要重新对接一遍）。
+   * 只在 mpv 播放页存在；弹幕跟随 mpv 的
+   * `time-pos`。
    * 字段用 `by lazy` + nullable：弹幕默认是关的，不该在 onCreate 里就建协程作用域。
    */
   private var danmakuState: app.marlboroadvance.mpvex.ui.player.danmaku.PlayerDanmakuState? = null
@@ -275,28 +269,10 @@ open class PlayerActivity :
   /** 弹幕状态访问器，供播放器 Sheet 复用当前 Emby 上下文。 */
   internal fun danmakuState(): app.marlboroadvance.mpvex.ui.player.danmaku.PlayerDanmakuState? = danmakuState
 
-  /**
-   * 「从头播放」一次性标记。
-   *
-   * Emby 详情页的「从头播放」会带 `play_from_start=true` 发起播放。置位后，
-   * [applyPlaybackState] 不再把本地续播记录里的 lastPosition 套回 `time-pos`
-   * —— 否则「从头播放」会被本地续播覆盖成「继续播放」。
-   *
-   * 只对本次 intent 的第一个视频生效（[loadVideoPlaybackState] 读出后立刻清掉），
-   * 这样剧集连播时后面的剧集仍然能恢复各自的观看进度。
-   */
+  /** Explicit start policy for this intent; the coordinator owns actual seek/resume. */
   private var playFromStartOnce = false
 
-  /**
-   * 「整场从头播放」标记（随机播放入口专用）。
-   *
-   * 「随机播放 / 随机播放收藏」里可能混着已经看完的剧：如果切到下一个视频时
-   * 恢复本地续播记录，会直接跳到片尾一秒就结束，观感极差。所以这两个入口
-   * 带 `play_from_start_all=true`，让**本次播放会话里的每一个视频**都从头放。
-   *
-   * 与 [playFromStartOnce] 的区别：它在整个会话内持续生效（读的时候不清零），
-   * 直到下一个 intent 重新赋值（随机入口必然带 true，其它入口必然是 false）。
-   */
+  /** Explicit per-session start policy, shared by registered queue entries. */
   private var playFromStartAllSession = false
 
   /**
@@ -313,13 +289,7 @@ open class PlayerActivity :
    */
   private var playlistTitles: List<String> = emptyList()
 
-  /**
-   * 「每部剧记住播放设置」用的键，与 playlist 下标一一对应（Emby 剧集是 SeriesId）。
-   *
-   * 单文件播放不走列表，用 [singleSeriesKey]；
-   * 列表播放按下标取，切集时键随之换成新一集所属的剧。
-   * 本地播放（非 Emby）两个都是空，记忆逻辑整体跳过。
-   */
+  /** Stable Emby series keys for danmaku matching, parallel to the internal playback queue. */
   private var playlistSeriesKeys: List<String> = emptyList()
   private var singleSeriesKey: String? = null
 
@@ -373,7 +343,7 @@ open class PlayerActivity :
    * Emby **ItemId → 用户为该条选定的媒体源 Id**（多版本条目才有；单版本 / 非 Emby 为空表）。
    *
    * 它的读取方是 [saveVideoPlaybackState]，按当前条目的 ItemId 查媒体源，
-   * 不依赖队列顺序，随机切集时也能对应到用户选定的版本。
+   * 不依赖队列顺序，切集时也能对应到用户选定的版本。
    */
   private var embyMediaSourceByItemId: Map<String, String> = emptyMap()
 
@@ -411,7 +381,15 @@ open class PlayerActivity :
     send = ::sendPlaybackStatisticsAction,
     onUnavailable = { showPlayerToast(getString(app.marlboroadvance.mpvex.R.string.player_statistics_unavailable)) },
   )
-  private var savePlaybackStateJob: kotlinx.coroutines.Job? = null // Track ongoing save job
+  /** The loaded file's immutable identity stays separate from the requested next entry. */
+  private data class LoadedPlaybackIdentity(
+    val url: String,
+    val identifier: String,
+    val versionProgressKey: String?,
+  )
+  private var loadedPlaybackIdentity: LoadedPlaybackIdentity? = null
+  private var lastPlaybackSnapshot: PlaybackStateSnapshot? = null
+  private var playbackRestoreJob: Job? = null
 
   // ==================== Background Playback ====================
 
@@ -587,7 +565,7 @@ open class PlayerActivity :
     // 没有这个列表时只能从 URL 末段猜标题 —— Emby 的流地址末段固定是 "stream"，
     // 于是从第二个视频起标题全变成 "stream"（ bug）。有它就优先用它。
     playlistTitles = intent.getStringArrayListExtra("playlist_titles") ?: emptyList()
-    // 「记住每部剧的播放设置」的键，与 playlist 下标一一对应
+    // Stable series keys are retained exclusively for danmaku matching.
     playlistSeriesKeys = intent.getStringArrayListExtra("playlist_series_keys") ?: emptyList()
     singleSeriesKey = intent.getStringExtra("emby_series_key")
     // ⚠️ 剧名（与 playlist 同序）——**弹幕自动匹配必须用它**，不能用某一集的标题。
@@ -611,7 +589,6 @@ open class PlayerActivity :
       ) ?: emptyList()
     // Emby 多版本：ItemId → 选定的媒体源 Id（按版本记进度的键靠它拼，见 EmbyVersionProgress）
     embyMediaSourceByItemId = buildEmbyMediaSourceMap(intent)
-    viewModel.seriesKey = currentSeriesKey()
 
     // Extract fileName early so it's available when video loads
     fileName = getFileName(intent)
@@ -649,7 +626,6 @@ open class PlayerActivity :
     remoteIsoRejected = true
     playbackUrl = uri
     durationWatchdogJob?.cancel()
-    cancelAutoplayCountdown()
     // Stop any previous file in this singleTask page; retry must never reopen the rejected ISO.
     if (mpvInitialized) PlayerLib.command("stop")
     viewModel.showPlaybackError(EmbyMediaSourcePolicy.ISO_PLAYBACK_ERROR)
@@ -661,9 +637,12 @@ open class PlayerActivity :
     url: String,
   ) {
     localLoadJob?.cancel()
+    playbackRestoreJob?.cancel()
+    cancelSkipSegmentWatcher()
     val generation = ++localLoadGeneration
     val source = intent
     prepareOrientationForFile(url)
+    viewModel.beginPlaybackItem(mediaIdentifier)
     localLoadJob = lifecycleScope.launch {
       try {
         loemby.prepare(url, loembyTransport, loembyCallbacks, this@PlayerActivity)
@@ -750,6 +729,8 @@ open class PlayerActivity :
         intent.data = Uri.parse(local)
         intent.putExtra(PlayerHandoff.EXTRA_INDEX, startIndex)
         playbackUrl = local
+        mediaIdentifier = getMediaIdentifierFromUri(Uri.parse(local), fileName)
+        viewModel.beginPlaybackItem(mediaIdentifier)
         if (source.hasExtra("position") && source.getIntExtra("position", 0) > 0) {
           loopback.setResume(local, source.getIntExtra("position", 0).toLong() * 10_000L)
           source.removeExtra("position")
@@ -905,6 +886,9 @@ open class PlayerActivity :
     replace: Boolean,
     preservePosition: Boolean,
   ) {
+    saveVideoPlaybackState()
+    cancelSkipSegmentWatcher()
+    playbackRestoreJob?.cancel()
     localLoadJob?.cancel()
     val generation = ++localLoadGeneration
     val source = intent
@@ -1018,52 +1002,7 @@ open class PlayerActivity :
             modifier = Modifier.align(Alignment.Center),
           )
 
-          // 下一集「悬停卡」（片尾前约 30 秒出现，无倒计时）：比倒计时胶囊(136)更高一截，
-          // 两者可能同时出现 —— 悬停卡在上、倒计时胶囊在下，各自都能点到。
-          NextUpCard(
-            viewModel = viewModel,
-            onPlayNow = {
-              autoplayCancelled = false
-              cancelAutoplayCountdown()
-              playNext()
-            },
-            onDismiss = {
-              // 收起 = 「本集别再提示了」：本集内不再弹出，本集播完仍按原逻辑自动连播，
-              // 与倒计时胶囊上的 ×（那是取消连播）语义**不同**，别合并。
-              // ⚠️ 只把 visible 置 false 没用：盯梢每 500ms 复算窗口会重新推开，
-              //    必须打上 nextUpDismissed 让它彻底不再弹出（下一集开播时清零）。
-              nextUpDismissed = true
-              viewModel.nextUpVisible.value = false
-              viewModel.nextUpTitle.value = null
-            },
-            modifier = Modifier
-              .align(Alignment.BottomEnd)
-              .padding(end = 16.dp, bottom = 176.dp),
-          )
-          // 下一集连播倒计时：贴在底部、抬高一截避开控制栏。
-          // 只有倒计时 > 0 时卡片才出现（AnimatedVisibility 内部判断）。
-          AutoplayCountdownCard(
-            viewModel = viewModel,
-            onPlayNow = {
-              // 点卡片 = 立刻切下一集（不等片尾放完）
-              autoplayCancelled = false
-              cancelAutoplayCountdown()
-              playNext()
-            },
-            onCancel = {
-              // 取消 = 本集播完停在最后一帧，不再自动连播
-              autoplayCancelled = true
-              cancelAutoplayCountdown()
-            },
-            // 右下角，抬高到控制条按钮簇上方：84dp 时正好压在右下控件上，
-            // 太高又飘到画面中央 —— 136dp 刚好越过「seekbar + 按钮簇」的总高度
-            modifier = Modifier
-              .align(Alignment.BottomEnd)
-              .padding(end = 16.dp, bottom = 136.dp),
-          )
-          // 「跳过片头 / 跳过片尾」小胶囊（b2+a1 手动模式）：右下角，
-          // 刻意比连播倒计时卡(136)再高一截 —— 片尾区间里两者可能同时可见
-          // （兜底片尾默认 90s，倒计时默认只有几秒），叠在一起会互相盖住。
+          // Intro/outro skipping is independent of automatic queue advancement.
           SkipSegmentChip(
             viewModel = viewModel,
             onSkip = {
@@ -1088,7 +1027,7 @@ open class PlayerActivity :
           // 服务端明确拒绝（401 / 403 / 404）时，由 Emby 侧预解析经
           // `play_error` extra 写入，或「重试」时由 [retryPlayback] 写入 ——
           // 替代原来的「native 崩溃、整个 App 消失」。必须排在所有浮层之后，
-          // 否则会被悬停卡 / 倒计时胶囊盖住，用户点不到「重试」。
+          // 否则错误提示可能被其他浮层遮挡。
           PlaybackErrorCard(
             viewModel = viewModel,
             onBack = {
@@ -1240,6 +1179,8 @@ open class PlayerActivity :
       return
     }
 
+    saveVideoPlaybackState()
+    playbackRestoreJob?.cancel()
     kotlinx.coroutines.CoroutineScope(Dispatchers.Main.immediate).launch {
       loemby.finish("quit", this@PlayerActivity)
     }
@@ -1248,9 +1189,6 @@ open class PlayerActivity :
     // 播放页退出：把 Window 从 HDR 色彩模式复位，别把系统亮度留在 HDR 区间。
     // 普通 SDR 播放不碰 Window（reset 内部判过 appliedHdr）。
     PlaybackColorPolicy.reset(this)
-
-    // 页面都没了就别再倒计时切集了
-    cancelAutoplayCountdown()
 
     // 片头片尾盯梢一起停（不取消的话切到后台它还每隔 0.5 秒读一次 mpv 属性）
     cancelSkipSegmentWatcher()
@@ -1271,36 +1209,6 @@ open class PlayerActivity :
         }
         stopService(Intent(this, MediaPlaybackService::class.java))
         mediaPlaybackService = null
-      }
-
-      // 存档协程正在读 mpv 属性并写 Room。原先这里 `runBlocking { job.join() }`
-      // **无限等它在主线程跑完** —— 那是 ANR 级的卡顿（Room 首次建表 + WAL fsync
-      // 可以到几百毫秒），而它要防的竞态其实有更省的办法：
-      // 竞态的本质是「destroy() 之后 job 还去读 mpv 属性」。所以只要**先冻结 mpv**
-      // （下面 cleanupMPV 里的 `player.isExiting = true` + `removeObserver`），
-      // job 读到的是什么就已经不重要了 —— 它写的要么是完整快照，要么是半截快照，
-      // 两种都不会让程序崩。
-      // 真正需要保证的是「别丢进度」，而那个由 onPause 的 `isSync` 分支负责
-      // （退出时那次是同步写的，见 saveVideoPlaybackState）。这里的 job 是
-      // onPause 之后的**异步补写**，它和 onPause 那次写的是同一份数据，
-      // 晚一点到账不会丢，只是时序上晚一点。
-      // 所以这里仍然等一下，但**必须有上限**：万一它真的卡住（磁盘满 / 数据库锁），
-      // 也不能让用户看着「退出应用」卡死在那儿。
-      savePlaybackStateJob?.let { job ->
-        if (job.isActive) {
-          Log.d(TAG, "Waiting for pending playback state save (max ${SAVE_JOIN_BUDGET_MS}ms)...")
-          runCatching {
-            kotlinx.coroutines.runBlocking {
-              withTimeoutOrNull(SAVE_JOIN_BUDGET_MS) { job.join() }
-            }
-          }.onFailure { Log.w(TAG, "Join playback state job failed", it) }
-          if (job.isActive) {
-            Log.w(TAG, "Playback state save still running after budget; releasing MPV anyway")
-            // 不 join 了：让这个协程随 Activity 一起结束。
-            // 它后续读 mpv 会拿到 null（内核已销毁），runCatching 会吞掉。
-            job.cancel()
-          }
-        }
       }
 
       cleanupMPV()
@@ -1423,10 +1331,9 @@ open class PlayerActivity :
       val shouldPause = (!audioPreferences.automaticBackgroundPlayback.get() && !isManualBackgroundPlayback) || 
                         (isUserFinishing && !isManualBackgroundPlayback)
 
-      // Save playback state before stopping MPV or finishing
-      // When finishing, do it synchronously so database is updated before MainActivity resumes
+      // Capture before stopping native playback; queued Room work does not block navigation.
       if (!isInPip || isFinishing || isUserFinishing) {
-        saveVideoPlaybackState(fileName, isSync = isFinishing || isUserFinishing)
+        saveVideoPlaybackState()
       }
 
       // OPTIMIZATION: Stop playback immediately if finishing to reduce cleanup overhead
@@ -1503,7 +1410,7 @@ open class PlayerActivity :
     runCatching {
       pipHelper.onStop()
       if (!isFinishing && !isUserFinishing) {
-        saveVideoPlaybackState(fileName)
+        saveVideoPlaybackState()
       }
 
       audioFocus.unregisterNoisyReceiver()
@@ -1534,19 +1441,6 @@ open class PlayerActivity :
 
       audioFocus.registerNoisyReceiver()
 
-      // Apply remembered brightness for the current series, falling back to the global value.
-      if (playerPreferences.rememberBrightness.get() ||
-        playerPreferences.rememberSeriesBrightness.get()
-      ) {
-        // 按剧优先于全局默认（见 PlayerPreferences.brightnessFor）：
-        // 上次把这部片调暗了，这次开播第一帧就该是暗的，不能先套全局值闪一下。
-        // ⚠️ 不写「两份都开时取按剧的」以外的分支 —— 由 brightnessFor 统一裁决。
-        val brightness = playerPreferences.brightnessFor(currentSeriesKey())
-        if (brightness != BRIGHTNESS_NOT_SET) {
-          viewModel.changeBrightnessTo(brightness)
-        }
-      }
-      
       // Reset manual background playback flag when returning to foreground
       isManualBackgroundPlayback = false
     }.onFailure { e ->
@@ -2082,7 +1976,10 @@ open class PlayerActivity :
       "seeking" -> {
         if (!isFinishing && mpvInitialized && orientationState.nativeStarted) viewModel.onNativeSeeking(value)
       }
-      "eof-reached" -> if (value) loemby.eofReached(this)
+      "eof-reached" -> if (value) {
+        captureVideoPlaybackState()
+        loemby.eofReached(this)
+      }
     }
   }
 
@@ -2107,25 +2004,6 @@ open class PlayerActivity :
       }
     }.onFailure { /* Silently ignore PiP update failures */ }
   }
-
-  /** 自动连播倒计时的盯梢协程；切集 / 取消 / 退出时都要 cancel，避免播完后还偷偷切集 */
-  private var autoplayCountdownJob: kotlinx.coroutines.Job? = null
-
-  /**
-   * 用户在倒计时卡片上点过「取消」：本集播完不再自动切，停在最后一帧。
-   * 只影响当前这一集，切集 / 开播下一集时清零。
-   */
-  private var autoplayCancelled = false
-
-  /**
-   * 用户在本集点过「下一集」悬停卡上的 ×：本集内不再弹这张卡。
-   *
-   * ⚠️ 必须有这个标记，不能只把 `nextUpVisible` 置 false ——
-   * 片尾盯梢每 500ms 复算一次出现窗口，只要剩余时长还在窗口内就会把 visible 重新置 true，
-   * 于是「叉掉半秒后又弹出来」⇒ × 形同虚设。只在每集开播时清零（见 loadFile 里
-   * `startAutoplayCountdownWatcher()` 的调用点），因此语义是「这一集别再烦我，下一集照常提示」。
-   */
-  private var nextUpDismissed = false
 
   // ==================== 片头片尾跳过（b2+a1） ====================
 
@@ -2152,7 +2030,7 @@ open class PlayerActivity :
    * 1. **拉精准数据**：Emby 4.7+ 的 `/Users/{UserId}/Items/{Id}/Intros`。
    *    拿不到（非 Emby 播放 / 服务端没扫描 / 网络断）就退到固定时长兜底，
    *    见 [PlayerPreferences.autoSkipIntro] 的 KDoc。
-   * 2. **轮询**：0.5 秒精度（同连播盯梢，不观察 time-pos —— 每帧回调的 JNI
+   * 2. **轮询**：0.5 秒精度（不观察 time-pos —— 每帧回调的 JNI
    *    开销在这里不值）。自动跳开关开着 ⇒ 播放头进入区间且没暂停就跳到段尾；
    *    开关关着 ⇒ 把「跳过片头 / 跳过片尾」小胶囊的文案写进
    *    [PlayerViewModel.skipSegmentLabel]，等用户自己点（手动精准跳）。
@@ -2242,115 +2120,7 @@ open class PlayerActivity :
     viewModel.skipSegmentLabel.value = null
   }
 
-  /**
-   * 每集开播时起一个轻量轮询：**快播完的那几秒**把倒计时卡片推到屏幕上。
-   *
-   * 不用「播完再倒数」的做法 —— 那样视频已经停在最后一帧了，
-   * 用户还要干等几秒才切，纯粹是浪费时间。现在卡片在片尾提前出现，
-   * 真正切集仍然发生在播完的那一刻（[onPlaybackEndedAutoplay]），一秒都不多等。
-   *
-   * 轮询而不是观察 mpv 的 time-remaining：后者每帧回调一次、JNI 开销明显，
-   * 而这里只需要 0.5 秒精度。
-   */
-  private fun startAutoplayCountdownWatcher() {
-    autoplayCountdownJob?.cancel()
-    val total = playerPreferences.autoplayNextCountdownSeconds.get()
-    // 下一集卡片（Yamby 的 next_up_sec）：比倒计时更早出现，给用户「要不要继续看」的决策时间。
-    val nextUpTotal = if (playerPreferences.showNextUpCard.get()) {
-      playerPreferences.nextUpShowSeconds.get().coerceIn(0, 300)
-    } else {
-      0
-    }
-    if (total <= 0 && nextUpTotal <= 0) {
-      autoplayCountdownJob = null
-      return
-    }
-    val startIndex = playlistIndex
-    autoplayCountdownJob = lifecycleScope.launch {
-      while (kotlinx.coroutines.currentCoroutineContext().isActive) {
-      kotlinx.coroutines.delay(500)
-      // 用户自己切了集 / 退出了 / 在片尾取消了：这次盯梢作废
-      if (playlistIndex != startIndex || isFinishing || autoplayCancelled) break
-      val nextIdx = peekNextIndex()
-      if (nextIdx == null) break // 没有下一集
-      val left = wallClockSecondsToEnd() ?: continue
-      // 下一集卡片：比倒计时早 nextUpTotal 秒出现。
-      // 用户点过 × ⇒ 本集不再进入这个分支，交给下面的 else 分支确保它保持收起。
-      if (nextUpTotal > 0 && !nextUpDismissed && left in 0.1..nextUpTotal.toDouble()) {
-        if (viewModel.nextUpTitle.value == null) {
-          viewModel.nextUpTitle.value = nextIdx?.let { playlistTitles.getOrNull(it) }
-        }
-        viewModel.nextUpVisible.value = true
-      } else if (viewModel.nextUpVisible.value) {
-        // 三种情况都收起来：用户叉掉了 / 往后拖出了窗口 / 设置里关了这一项
-        viewModel.nextUpVisible.value = false
-        viewModel.nextUpTitle.value = null
-      }
-      // 进入最后 total 秒：把卡片推出来，之后每 0.5 秒刷新一次，数字自然往下走
-      if (total > 0 && left in 0.1..total.toDouble()) {
-        if (viewModel.autoplayNextTitle.value == null) {
-          viewModel.autoplayNextTitle.value = peekNextIndex()?.let { playlistTitles.getOrNull(it) }
-        }
-        viewModel.autoplayCountdown.value = kotlin.math.ceil(left).toInt().coerceAtLeast(1)
-      } else if (total > 0 && left > total && viewModel.autoplayCountdown.value > 0) {
-        // 用户往后拖了进度条：卡片收起来，等再次接近片尾再出现
-        viewModel.autoplayCountdown.value = 0
-        viewModel.autoplayNextTitle.value = null
-      }
-    }
-  }
-}
-
-/**
- * 距离本集播完还剩多少**真实**秒数（考虑倍速）。
- *
- * mpv 的 duration / time-pos 都是媒体时间，2 倍速下剩 10 秒片尾实际只要 5 秒就放完，
- * 所以要除以当前倍速，否则卡片会早一倍时间弹出来。
- */
-private fun wallClockSecondsToEnd(): Double? {
-  val duration = PlayerLib.getPropertyDouble("duration") ?: return null
-  val position = PlayerLib.getPropertyDouble("time-pos") ?: return null
-  val speed = PlayerLib.getPropertyDouble("speed") ?: 1.0
-  if (duration <= 0 || speed <= 0) return null
-  return (duration - position) / speed
-}
-
-/**
- * 播完一集时调用：默认直接切下一集（一秒都不等），
- * 除非用户刚才在卡片上点了「取消」——那就停在最后一帧，等他手动操作。
- *
- * 取消标记用完即清，只影响「这一集」，下一集重新给机会。
- */
-private fun onPlaybackEndedAutoplay() {
-  val cancelled = autoplayCancelled
-  autoplayCancelled = false
-  autoplayCountdownJob?.cancel()
-  autoplayCountdownJob = null
-  viewModel.autoplayCountdown.value = 0
-  viewModel.autoplayNextTitle.value = null
-  if (cancelled) return
-  playNext()
-}
-
-/** 取消倒计时：卡片上的「取消」按钮，以及用户手动切集 / 退出时都要调用 */
-private fun cancelAutoplayCountdown() {
-  autoplayCountdownJob?.cancel()
-  autoplayCountdownJob = null
-  viewModel.autoplayCountdown.value = 0
-  viewModel.autoplayNextTitle.value = null
-  viewModel.nextUpVisible.value = false
-  viewModel.nextUpTitle.value = null
-}
-
-  /** 下一个要播的条目下标（不切换，供片尾提示取标题）。 */
-  private fun peekNextIndex(): Int? =
-    playlist.takeIf { it.isNotEmpty() && playlistIndex < it.lastIndex }?.let { playlistIndex + 1 }
-
-  /**
-   * 当前这一集对应的「记忆键」：列表播放按下标取，单文件播放用 intent 里那个。
-   *
-   * 取不到就返回 null，此时播放速度 / 音轨记忆整体跳过（本地播放就是这种情况）。
-   */
+  /** Series identity is retained only for danmaku matching. */
   private fun currentSeriesKey(): String? =
     playlistSeriesKeys.getOrNull(playlistIndex) ?: singleSeriesKey
 
@@ -2455,7 +2225,7 @@ private fun cancelAutoplayCountdown() {
    * 当前播放条目**实际在播的那个版本**的媒体源 Id；单版本 / 非 Emby 返回 null。
    *
    * 查的是 [embyMediaSourceByItemId]（ItemId → MediaSourceId 的 Map），
-   * 与队列顺序无关，正常或随机切集都会取当前条目对应的媒体源。
+   * 与队列顺序无关，切集时取当前条目对应的媒体源。
    */
   fun currentEmbyMediaSourceId(): String? =
     currentEmbyItemId()
@@ -2486,121 +2256,23 @@ private fun cancelAutoplayCountdown() {
     }
   }
 
-  /**
-   * 当前播放条目的「按版本进度键」；非 Emby / 单版本 / 该条没选版本时返回 null。
-   *
-   * 键形状与详情页算的完全一致（同一份 [EmbyVersionProgress]），两个页面各算各的、
-   * 不需要互通。详见该对象的注释：Emby 服务端的进度是按条目共享的，多版本条目只能本地分开记。
-   *
-   * ItemId 从 **mpv 当前路径**反查，确保进度键对应实际在播的条目。
-   */
-  private fun currentEmbyVersionProgressKey(): String? {
-    val serverId =
-      intent.getLongExtra(
-        app.marlboroadvance.mpvex.ui.browser.emby.EmbyPlaybackReporter.EXTRA_SERVER_ID,
-        -1L,
-      )
-    if (serverId <= 0) return null
-    val itemId = currentEmbyItemId() ?: return null
-    val sourceId = embyMediaSourceByItemId[itemId]?.takeIf { it.isNotBlank() } ?: return null
-    return app.marlboroadvance.mpvex.domain.emby.EmbyVersionProgress.key(serverId, itemId, sourceId)
+  private fun playbackIdentity(url: String): LoadedPlaybackIdentity? {
+    val spec = loopback.specForUrl(url) ?: return null
+    val identifier = "emby:${spec.server.sourceKey}:${spec.server.remoteId}:${spec.itemId}"
+    val source = loembyPlaybackState.value?.takeIf { it.url == url }?.resolved?.source?.Id
+      ?.takeIf(String::isNotBlank)
+      ?: embyMediaSourceByItemId[spec.itemId]?.takeIf(String::isNotBlank)
+    val versionKey = source?.let {
+      app.marlboroadvance.mpvex.domain.emby.EmbyVersionProgress.key(spec.server.id, spec.itemId, it)
+    }
+    return LoadedPlaybackIdentity(url, identifier, versionKey)
   }
 
-  /**
-   * 切集后把记忆键同步给 ViewModel —— 用户在这一集里改的速度 / 音轨要记到「这一部剧」名下。
-   */
-  private fun refreshSeriesKey() {
-    viewModel.seriesKey = currentSeriesKey()
-  }
-
-  /**
-   * 应用「本剧上次记住的播放速度 / 音轨」。
-   *
-   * 只在开关打开且有记忆键时生效；音轨按指纹匹配（见 [PlaybackMemory]），
-   * 匹配不到就什么都不做，交给 TrackSelector 的默认语言逻辑。
-   */
-  private fun applyRememberedPlaybackSettings() {
-    val key = currentSeriesKey()
-    viewModel.seriesKey = key
-    // b4 全局倍速记忆作为**兜底**：先套全局上次倍速，再让每剧记忆覆盖。
-    // 顺序不能反 —— 每剧记忆优先级更高（同剧切集沿用本剧调过的速度）。
-    if (playerPreferences.rememberGlobalSpeed.get()) {
-      val last = playerPreferences.lastPlaybackSpeed.get()
-      if (last > 0f) {
-        runCatching { PlayerLib.setPropertyDouble("speed", last.toDouble()) }
-      }
-    }
-    if (key.isNullOrBlank()) return
-    if (playerPreferences.rememberSpeedPerSeries.get()) {
-      val speed = PlaybackMemory.speedFor(playerPreferences, key)
-      if (speed != null && speed > 0f) {
-        runCatching { PlayerLib.setPropertyDouble("speed", speed.toDouble()) }
-      }
-    }
-    if (loopback.isLocalPlayUrl(playbackUrl.orEmpty())) return
-    if (playerPreferences.rememberAudioTrackPerSeries.get()) {
-      val fingerprint = PlaybackMemory.audioFingerprintFor(playerPreferences, key)
-      if (!fingerprint.isNullOrBlank()) {
-        val trackId = PlaybackMemory.findAudioTrackId(fingerprint)
-        if (trackId != null && trackId > 0) {
-          runCatching { PlayerLib.setPropertyInt("aid", trackId) }
-        }
-      }
-    }
-    if (playerPreferences.rememberSubtitleTrackPerSeries.get()) {
-      val fingerprint = PlaybackMemory.subtitleFingerprintFor(playerPreferences, key)
-      if (!fingerprint.isNullOrBlank()) {
-        val trackId = PlaybackMemory.findSubtitleTrackId(fingerprint)
-        if (trackId != null && trackId > 0) {
-          runCatching { PlayerLib.setPropertyInt("sid", trackId) }
-        }
-      }
-    }
-  }
-
-  /**
-   * Handles end-of-file event by playing next in playlist if available, otherwise finishing activity if configured.
-   *
-   * @param isEof true if end of file reached
-   */
+  /** Called only by the coordinator after normal EOF settlement; final entries remain open. */
   private fun handleEndOfFile(isEof: Boolean) {
-    if (remoteIsoRejected) return
-    if (isEof) {
-      // 诊断埋点：EOF 时「停在哪儿」比「有没有 EOF」有用得多。
-      // 若 `pos` 比 `duration` 小了明显一截，这条流是**被提前掐断**的
-      // （上游的问题，不是片子真播完了）。
-      PlayerDiagLog.log(
-        "eof",
-        "pos=${PlayerLib.getPropertyDouble("time-pos")} " +
-          "duration=${PlayerLib.getPropertyDouble("duration")}",
-      )
-      // Handle playlist playback
-      if (playlist.isNotEmpty()) {
-        val hasNextItem = playlistIndex < playlist.size - 1
-
-        // Check if autoplay next video is enabled
-        val autoplayEnabled = playerPreferences.autoplayNextVideo.get()
-        if (hasNextItem && autoplayEnabled) {
-          // 卡片在片尾倒数阶段已经弹过了，这里直接切，不再多等；
-          // 只有用户在卡片上点过「取消」才会停住不动。
-          onPlaybackEndedAutoplay()
-        } else if (!hasNextItem && playerPreferences.closeAfterReachingEndOfVideo.get()) {
-          // 只有"真的没有下一集可播"时才退出播放器（整个队列/单文件播放结束）。
-          // autoplay 关闭但队列里还有后续时，属于"等用户手动切"，不能算播放结束，
-          // 因此停住而不是退出 —— 否则会和"自动下一集"抢同一段判断。
-          // isReady 兜底：从来没真正起播过（例如备用内核打开失败）时不能退出，
-          // 否则表现就是"进播放器转两下就被踢回上一页"。
-          if (isReady) finishAndRemoveTask()
-        }
-        // 其余情况（autoplay 关 且 队列还有后续）：停在当前视频，等用户手动切集
-      } else {
-        // Single video playback (no playlist)
-        // 同样要求真的起播过：备用内核打开失败时不能把用户踢回上一页。
-        if (playerPreferences.closeAfterReachingEndOfVideo.get() && isReady) {
-          finishAndRemoveTask()
-        }
-      }
-    }
+    if (!isEof || remoteIsoRejected) return
+    saveVideoPlaybackState()
+    if (hasNext()) playNext()
   }
 
   /** 时长看守协程（每片一份，换片即取消） */
@@ -2647,6 +2319,7 @@ private fun cancelAutoplayCountdown() {
           delay(DURATION_WATCHDOG_INTERVAL_MS)
           if (PlayerLib.getPropertyBoolean("eof-reached") == true) return@launch
           val pos = PlayerLib.getPropertyDouble("time-pos") ?: continue
+          captureVideoPlaybackState()
           val mpvDuration = PlayerLib.getPropertyDouble("duration") ?: 0.0
           // 每秒把 mpv 当前值喂回 ViewModel：
           //  ① 换片时 `resetProbedDuration` 会清掉 `_preciseDuration`，而 StateFlow
@@ -2860,10 +2533,14 @@ private fun cancelAutoplayCountdown() {
         if (nativeIndex != null && nativeIndex in playlist.indices) {
           if (nativeIndex != playlistIndex) synchronizeNativePlaylistIndex(nativeIndex)
           val expectedUrl = playlist[nativeIndex].toString()
+          mediaIdentifier = getMediaIdentifierFromUri(Uri.parse(expectedUrl), fileName)
+          viewModel.beginPlaybackItem(mediaIdentifier)
           playbackUrl = expectedUrl
           intent.data = Uri.parse(expectedUrl)
         }
+        playbackRestoreJob?.cancel()
         val identity = playbackUrl ?: return
+        if (loadedPlaybackIdentity?.url == identity) loadedPlaybackIdentity = null
         // START_FILE can precede path availability; native geometry is gated until a matching restart.
         updateOrientation(orientationState.startFile(identity))
         viewModel.onLoadingNewFile()
@@ -2873,6 +2550,7 @@ private fun cancelAutoplayCountdown() {
         }
       }
     }
+    if (eventId == MPVLib.MpvEvent.MPV_EVENT_END_FILE) captureVideoPlaybackState()
     if (data != null) loemby.event(eventId, data, this)
     when (eventId) {
       MPVLib.MpvEvent.MPV_EVENT_FILE_LOADED -> {
@@ -3005,54 +2683,39 @@ private fun cancelAutoplayCountdown() {
     startBackgroundPlayback()
 
     MpvNetSpeedSampler.reset()
-    // Disk cleanup must never run while the current demuxer cache is open.
     setIntentExtras(intent.extras)
     // Initial playback and native queue selection converge here; automatic matching is idempotent per load.
     notifyDanmakuEpisodeChanged(playlistIndex)
 
-    // mpv 已经换成新文件：轨道列表重建了，外挂字幕跟踪表必须跟着清。
-    // 不清的话恢复流程会以为「这条字幕已经加过了」而跳过，字幕就再也加不回来。
+    // Native tracks have been rebuilt; keep manual external-subtitle bookkeeping file-scoped.
     viewModel.resetExternalSubtitles()
 
-    // 先落媒体标题、再进下面的恢复流程 —— 顺序很关键：
-    // 1) setMediaTitle 会 clear() 外挂字幕列表。若它排在外挂字幕恢复**之后**，刚恢复的记录
-    //    会被抹掉 → 退出时保存成空 → 下次打开无从恢复。这正是「外挂字幕记不住」的根因之一。
-    // setMediaTitle also resets the retained session-only pinch zoom before state restoration.
+    // setMediaTitle resets the session-only pinch zoom.
     // Don't force media-title for m3u/m3u8 streams - let MPV provide it
     if (!isCurrentStreamM3U()) {
       PlayerLib.setPropertyString("force-media-title", fileName)
       viewModel.setMediaTitle(fileName)
     }
 
-    lifecycleScope.launch(Dispatchers.IO) {
-      // Load playback state. 这几步的**顺序**是外挂字幕能记住的关键：
-      // 1) loadVideoPlaybackState 里会把存档中的外挂字幕加回 mpv，并等轨道真正挂上；
-      // 2) 「同名外挂字幕自动加载」与 TrackSelector 并行跑（网络目录列举可能很慢，
-      //    不能挡住音轨偏好等其他恢复步骤）；有存档时不抢选择（autoSelectFirst = false）；
-      // 3) 等自动加载也挂完，最后才把存档里的字幕选择套一次 —— 此时所有字幕轨都已就位。
-      // Load playback state (will skip track restoration if preferred language configured)
-      loadVideoPlaybackState(fileName)
-      withContext(Dispatchers.Main) { applyRememberedPlaybackSettings() }
+    // The current logical item may be unchanged (version switch/recovery); preserve only its session speed.
+    val loadedUrl = playbackUrl ?: return
+    val identity = playbackIdentity(loadedUrl) ?: return
+    loadedPlaybackIdentity = identity
+    lastPlaybackSnapshot = null
+    mediaIdentifier = identity.identifier
+    viewModel.beginPlaybackItem(identity.identifier)
+    captureVideoPlaybackState()
 
-      // 起一个盯梢协程：片尾倒数阶段把「下一集」卡片推出来
-      autoplayCancelled = false
-      // 新的一集 ⇒ 用户上一集叉掉「下一集」卡片的决定作废，重新给一次提示机会
-      nextUpDismissed = false
-      withContext(Dispatchers.Main) { startAutoplayCountdownWatcher() }
-
-      // 起片头片尾盯梢（b2+a1）：拉精准分段 + 自动跳 / 手动胶囊
-      withContext(Dispatchers.Main) { startSkipSegmentWatcher() }
-
+    playbackRestoreJob?.cancel()
+    playbackRestoreJob = lifecycleScope.launch {
+      loadVideoPlaybackState(identity)
+      if (loadedPlaybackIdentity?.url == loadedUrl && !isFinishing && !isDestroyed) startSkipSegmentWatcher()
     }
 
     // The orientation state is owned by the video geometry/manual rotate action.
     setOrientation()
 
     applySubtitlePreferences()
-
-    // 黑边自动裁切：开关打开则探测并裁掉四周黑边；关掉的路径也要清一次 ——
-    // 裁切是挂在 mpv 的 vf 链上的，不会随换片自动消失，不清就会带着上一条的黑边偏移播。
-    viewModel.applyAutoCropPolicy()
 
     viewModel.unpause()
 
@@ -3189,326 +2852,73 @@ private fun cancelAutoplayCountdown() {
   @OptIn(ExperimentalStdlibApi::class)
   private fun Int.toColorHexString() = "#" + this.toHexString().uppercase()
 
-  /**
-   * Saves the current playback state to the database.
-   *
-   * @param mediaTitle The title of the media being played
-   * @param isSync If true, executes synchronously on the calling thread with runBlocking.
-   *               Essential during onPause when finishing so the state is written before MainActivity resumes.
-   */
-  private fun saveVideoPlaybackState(mediaTitle: String, isSync: Boolean = false) {
-    if (mediaIdentifier.isBlank()) return
-
-    // Cancel any previous pending save operation
-    savePlaybackStateJob?.cancel()
-
-    // Read values from MPV immediately while it is still loaded (before stop/destroy or coroutine delay)
-    val currentPos = (PlayerLib.getPropertyInt("time-pos") ?: viewModel.pos ?: 0).coerceAtLeast(0)
-    // ⚠️ 三档回落，别只读 mpv：`.mts` 这类容器在取流层不可随机读时 mpv 的 `duration`
-    // 恒为 0（见 startDurationWatchdog），只读它会把「已看/剩余时间」整条链路打成 0。
-    val currentDuration =
-      (
-        PlayerLib.getPropertyInt("duration")?.takeIf { it > 0 }
-          ?: viewModel.effectiveDurationSeconds().toInt().takeIf { it > 0 }
-          ?: (viewModel.duration ?: 0)
-        ).coerceAtLeast(0)
-    val speed = PlayerLib.getPropertyDouble("speed") ?: DEFAULT_PLAYBACK_SPEED
-    val currentSid = PlayerLib.getPropertyInt("sid") ?: -1
-    val currentSecondarySid = PlayerLib.getPropertyInt("secondary-sid") ?: -1
-    val (effectiveSid, effectiveSecondarySid) = if (currentSid <= 0 && currentSecondarySid > 0) {
-      currentSecondarySid to -1
-    } else {
-      currentSid to currentSecondarySid
-    }
-    val subDelay = ((PlayerLib.getPropertyDouble("sub-delay") ?: 0.0) * MILLISECONDS_TO_SECONDS).toInt()
-    val subSpeed = PlayerLib.getPropertyDouble("sub-speed") ?: DEFAULT_SUB_SPEED
-    val aid = PlayerLib.getPropertyInt("aid") ?: -1
-    val audioDelay = ((PlayerLib.getPropertyDouble("audio-delay") ?: 0.0) * MILLISECONDS_TO_SECONDS).toInt()
-    val externalSubs = viewModel.externalSubtitles.joinToString("|")
-    val watchedThreshold = browserPreferences.watchedThreshold.get()
-    val saveOnQuit = playerPreferences.savePositionOnQuit.get()
-    // 多版本媒体：这一条属于哪个「版本」？键由 (服务器, 条目, 媒体源) 拼出，详情页用同一个键读数。
-    // ⚠️ 必须在**主线程、mpv 还活着**的时候读（要读 mpv 当前路径），与上面那批属性一起取。
-    // 只有「记住播放位置」开着才写：按版本进度是本地续播的一部分，开关关掉就该整体不生效。
-    val embyVersionKey = if (saveOnQuit) currentEmbyVersionProgressKey() else null
-
-    val saveBlock: suspend () -> Unit = {
-      runCatching {
-        val oldState = playbackStateRepository.getVideoDataByTitle(mediaIdentifier)
-        Log.d(TAG, "Saving playback state for: $mediaTitle (identifier: $mediaIdentifier)")
-
-        val duration = if (currentDuration > 0) {
-          currentDuration
-        } else {
-          (oldState?.lastPosition ?: 0) + (oldState?.timeRemaining ?: 0)
-        }
-
-        val lastPosition = if (!saveOnQuit) {
-          oldState?.lastPosition ?: 0
-        } else if (duration > 0 && currentPos >= duration - 1) {
-          0
-        } else {
-          currentPos
-        }
-
-        val timeRemaining = if (duration > lastPosition) duration - lastPosition else 0
-
-        val hasBeenWatched = run {
-          val durationSeconds = duration.toFloat()
-          val isFinished = (durationSeconds > 0) && (currentPos >= durationSeconds - 1)
-          val progress = if (durationSeconds > 0) currentPos.toFloat() / durationSeconds else 0f
-          val isCurrentlyWatched = progress >= (watchedThreshold / 100f)
-          val oldProgress = if (durationSeconds > 0) lastPosition.toFloat() / durationSeconds else 0f
-          val wasWatchedThisSession = oldProgress >= (watchedThreshold / 100f)
-
-          isCurrentlyWatched || isFinished || wasWatchedThisSession || (oldState?.hasBeenWatched == true)
-        }
-
-        val entity =
-          PlaybackStateEntity(
-            mediaTitle = mediaIdentifier,
-            lastPosition = lastPosition,
-            playbackSpeed = speed,
-            sid = effectiveSid,
-            secondarySid = effectiveSecondarySid,
-            subDelay = subDelay,
-            subSpeed = subSpeed,
-            aid = aid,
-            audioDelay = audioDelay,
-            timeRemaining = timeRemaining,
-            externalSubtitles = externalSubs,
-            hasBeenWatched = hasBeenWatched,
-          )
-        playbackStateRepository.upsert(entity)
-        // 多版本媒体：再按「版本」记一份。
-        // Emby 服务端的进度是按**条目**存的 —— 4K 与 1080P 共用一个续播点，服务端层面无解。
-        // 所以在本地多记一条（键见 EmbyVersionProgress），详情页就能让每个版本各算各的进度。
-        embyVersionKey?.let { playbackStateRepository.upsert(entity.copy(mediaTitle = it)) }
-        Log.d(TAG, "Playback state saved successfully: pos=$lastPosition, duration=$duration, remaining=$timeRemaining, watched=$hasBeenWatched")
-      }.onFailure { e ->
-        Log.e(TAG, "Error saving playback state", e)
-      }
-    }
-
-    if (isSync) {
-      // 退出路径（`isFinishing` / `isUserFinishing`）原先是
-      // `runBlocking(Dispatchers.IO) { saveBlock() }` —— 看着「切了 IO 就不卡主线程」，
-      // 其实**完全误解了**：`runBlocking` 阻塞的是**调用线程**，
-      // 写成 `Dispatchers.IO` 只是让 `saveBlock` 在 IO 线程执行，
-      // 主线程照样原地等到磁盘写完。按返回键退出时每次都卡一下，
-      // 数据库慢一点（首次建表 / WAL fsync / 磁盘忙）就是 ANR。
-      // 关键在于**该保住的东西已经保住了**：上面 `currentPos` / `currentDuration` /
-      // `speed` / `sid` … 全都在**主线程同步从 mpv 读完了**（mpv 属性读取是纳秒级的
-      // 内存读，不涉及 IO），`saveBlock` 内部只剩 `getVideoDataByTitle` + `upsert`
-      // 两个 Room 调用。所以改成异步**不会丢任何数据** ——
-      // 进度值已经以本地变量的形式被捕获进闭包了。
-      // 那 `isSync` 这个参数还需要吗？需要，但要重新定义它：
-      // 它的意义从「同步写库」变成「**持有这个 Job 引用**」——
-      // 退出时把 job 记进 [savePlaybackStateJob]，onDestroy 里好去 join/取消。
-      savePlaybackStateJob = lifecycleScope.launch(Dispatchers.IO) {
-        saveBlock()
-      }
-    } else {
-      savePlaybackStateJob = lifecycleScope.launch(Dispatchers.IO) {
-        saveBlock()
-      }
-    }
+  /** Snapshot native state before any switch/stop; the app-level writer owns all later Room work. */
+  private fun saveVideoPlaybackState() {
+    val snapshot = captureVideoPlaybackState() ?: lastPlaybackSnapshot ?: return
+    playbackStateWriter.enqueue(snapshot)
   }
 
-  /**
-   * Loads and applies saved playback state from the database.
-   *
-   * @param mediaTitle The title of the media being played
-   * @return true if saved state was found and applied, false otherwise
-   */
-  private suspend fun loadVideoPlaybackState(mediaTitle: String): Boolean {
-    // 「从头播放」是一次性标记：这里读出后立刻清掉，避免影响后面的剧集。
-    // 「整场从头播放」（随机播放入口）是会话级标记：整个会话都不清，切到哪个视频都从头放。
-    val playFromStart = playFromStartOnce || playFromStartAllSession
+  private fun captureVideoPlaybackState(): PlaybackStateSnapshot? {
+    val identity = loadedPlaybackIdentity ?: return null
+    if (!loopback.ownsMediaUrl(identity.url, PlayerLib.getPropertyString("path"))) return null
+    val currentPos = (PlayerLib.getPropertyInt("time-pos") ?: return null).coerceAtLeast(0)
+    val currentDuration = (
+      PlayerLib.getPropertyInt("duration")?.takeIf { it > 0 }
+        ?: viewModel.effectiveDurationSeconds().toInt().takeIf { it > 0 }
+        ?: viewModel.duration ?: 0
+      ).coerceAtLeast(0)
+    val sid = PlayerLib.getPropertyInt("sid") ?: -1
+    val secondarySid = PlayerLib.getPropertyInt("secondary-sid") ?: -1
+    val singleSecondary = sid <= 0 && secondarySid > 0
+    val snapshot = PlaybackStateSnapshot(
+      state = PlaybackStateEntity(
+        mediaTitle = identity.identifier,
+        lastPosition = currentPos,
+        playbackSpeed = viewModel.sessionPlaybackSpeed.toDouble(),
+        sid = if (singleSecondary) secondarySid else sid,
+        secondarySid = if (singleSecondary) -1 else secondarySid,
+        subDelay = ((PlayerLib.getPropertyDouble("sub-delay") ?: 0.0) * MILLISECONDS_TO_SECONDS).toInt(),
+        subSpeed = PlayerLib.getPropertyDouble("sub-speed") ?: DEFAULT_SUB_SPEED,
+        aid = PlayerLib.getPropertyInt("aid") ?: -1,
+        audioDelay = ((PlayerLib.getPropertyDouble("audio-delay") ?: 0.0) * MILLISECONDS_TO_SECONDS).toInt(),
+        externalSubtitles = viewModel.externalSubtitles.joinToString("|"),
+      ),
+      durationSeconds = currentDuration,
+      watchedThreshold = browserPreferences.watchedThreshold.get(),
+      versionProgressKey = identity.versionProgressKey,
+    )
+    lastPlaybackSnapshot = snapshot
+    return snapshot
+  }
+
+  /** Restores local adjustments only after all prior immutable snapshots have been written. */
+  private suspend fun loadVideoPlaybackState(identity: LoadedPlaybackIdentity): Boolean {
     playFromStartOnce = false
-
-    // 先清掉上一集留下的「待恢复字幕选择」，避免 mediaIdentifier 为空直接 return 时
-    // 把上一集的 sid 误套到本集上（会连累 applyRestoredSubtitleSelection）。
-    restoredSubtitleSid = NO_SAVED_SUBTITLE_SELECTION
-    restoredSecondarySubtitleSid = NO_SAVED_SUBTITLE_SELECTION
-
-    if (mediaIdentifier.isBlank()) return false
-
-    return runCatching {
-      val state = playbackStateRepository.getVideoDataByTitle(mediaIdentifier)
-
-      applyPlaybackState(state, playFromStart)
+    return try {
+      val state = playbackStateWriter.read(identity.identifier)
+      if (loadedPlaybackIdentity?.url != identity.url || isFinishing || isDestroyed) return false
+      applyPlaybackState(state)
       applyDefaultSettings(state)
-
+      captureVideoPlaybackState()
       state != null
-    }.onFailure { e ->
-      Log.e(TAG, "Error loading playback state", e)
-    }.getOrDefault(false)
-  }
-
-  /**
-   * 本次加载从存档里读到的字幕选择（主 / 副）。哨兵值见 [NO_SAVED_SUBTITLE_SELECTION]。
-   * 先记下来、等所有字幕来源都挂上之后再统一套 —— 见 [applyRestoredSubtitleSelection]。
-   */
-  private var restoredSubtitleSid: Int = NO_SAVED_SUBTITLE_SELECTION
-
-  private var restoredSecondarySubtitleSid: Int = NO_SAVED_SUBTITLE_SELECTION
-
-  /**
-   * 把存档里的字幕选择**最后一次**确定地套到播放器上。
-   *
-   * 必须等「存档外挂字幕 + 同名自动加载 + 下载目录扫描」都做完之后再调：这些来源都是
-   * 异步挂轨的，谁先挂上不确定，而「上次选的是哪条」只能以存档为准 ——
-   *   · 早一步设 `sid`，轨道可能还不存在，mpv 会把这次选择丢掉（外挂字幕就是这样丢的）；
-   *   · 晚一步又会被自动加载的 `select` 抢走。
-   * 所以统一收口在这里，一次套准。三种情况：选中某条 / 只选了副字幕 / 上次就没字幕。
-   */
-  private fun applyRestoredSubtitleSelection() {
-    // 外部应用经 intent 显式指定要启用的字幕（subs.enable）优先级最高 —— 那是用户在
-    // 文件管理器里点「用影屿播放 + 带上这条字幕」，不该被存档里的旧选择盖掉。
-    if (intent.hasExtra("subs.enable")) return
-
-    val sid = restoredSubtitleSid
-    if (sid == NO_SAVED_SUBTITLE_SELECTION) return
-    val secondarySid = restoredSecondarySubtitleSid
-
-    when {
-      sid > 0 -> {
-        if (player.sid != sid) player.sid = sid
-        if (secondarySid > 0 && secondarySid != sid) {
-          if (player.secondarySid != secondarySid) player.secondarySid = secondarySid
-        } else if (player.secondarySid > 0) {
-          player.secondarySid = -1
-        }
-        Log.d(TAG, "Restored subtitle selection: sid=$sid, secondary=$secondarySid")
-      }
-
-      secondarySid > 0 -> {
-        // 只有副字幕：提到主字幕（单条字幕必须贴底显示）
-        player.secondarySid = -1
-        player.sid = secondarySid
-        Log.d(TAG, "Promoted saved secondary subtitle track $secondarySid to primary (single subtitle must stay at bottom)")
-      }
-
-      else -> {
-        // 上次没有选中任何字幕：保持关闭 —— 否则「同名自动加载」或文件自带的默认轨会把它
-        // 重新打开，用户会以为「我把字幕关了」这个选择没被记住。
-        if (player.sid > 0) {
-          player.sid = -1
-          Log.d(TAG, "Restored 'subtitles off' state from saved state")
-        }
-        if (player.secondarySid > 0) player.secondarySid = -1
-      }
+    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+      throw cancelled
+    } catch (_: Exception) {
+      Log.w(TAG, "Local playback state restoration failed")
+      false
     }
   }
 
   /**
-   * Applies saved playback state to MPV.
-   *
-   * Restores subtitle delay, audio delay, audio track selection, and playback speed.
-   * 字幕的**选中**不在这里做（见 [applyRestoredSubtitleSelection]），本函数只负责把
-   * 存档里的外挂字幕加回 mpv 并等它们真正挂上。
-   * Also restores saved time position if enabled.
-   *
-   * @param state The saved playback state entity
-   * @param playFromStart true 表示用户显式点了「从头播放」，本地续播位置一律不恢复
+   * The coordinator owns local-route resume/track selection. Room restores only live delay adjustments.
    */
-  private suspend fun applyPlaybackState(
-    state: PlaybackStateEntity?,
-    playFromStart: Boolean = false,
-  ) {
-    if (state == null) {
-      // 没有存档：字幕交给 TrackSelector 按偏好决定，这里不记任何「待恢复的选择」
-      restoredSubtitleSid = NO_SAVED_SUBTITLE_SELECTION
-      restoredSecondarySubtitleSid = NO_SAVED_SUBTITLE_SELECTION
-      return
-    }
-
-    // The local play route owns resume and track selection; retain only Android visual/audio adjustments.
-    if (loopback.isLocalPlayUrl(playbackUrl.orEmpty())) {
-      restoredSubtitleSid = NO_SAVED_SUBTITLE_SELECTION
-      restoredSecondarySubtitleSid = NO_SAVED_SUBTITLE_SELECTION
-      PlayerLib.setPropertyDouble("sub-delay", state.subDelay / DELAY_DIVISOR)
-      PlayerLib.setPropertyDouble("secondary-sub-delay", state.subDelay / DELAY_DIVISOR)
-      PlayerLib.setPropertyDouble("audio-delay", state.audioDelay / DELAY_DIVISOR)
-      PlayerLib.setPropertyDouble("speed", state.playbackSpeed)
-      PlayerLib.setPropertyDouble("sub-speed", state.subSpeed)
-      PlayerLib.setPropertyDouble("secondary-sub-speed", state.subSpeed)
-      return
-    }
-
-    // 先把存档里的字幕选择记下来，等所有字幕来源（存档外挂字幕 / 同名自动加载 /
-    // 下载目录扫描）都挂上之后，再由 applyRestoredSubtitleSelection() 统一定夺。
-    restoredSubtitleSid = state.sid
-    restoredSecondarySubtitleSid = state.secondarySid
-
-    val subDelay = state.subDelay / DELAY_DIVISOR
-    val audioDelay = state.audioDelay / DELAY_DIVISOR
-
-    // Restore external subtitles first.
-    // ⚠️ 这里必须**等轨道真正挂进 track-list** 再往下走：`sub-add` 是异步命令，
-    // 命令返回时轨道还没建出来，紧接着设 `sid` 会被 mpv 当成「不存在的轨道」直接丢弃
-    // —— 外挂字幕「重开 app 就没了」正是这个顺序造成的。
-    // （内嵌字幕轨在文件加载时就已经存在，所以只有外挂字幕会中招。）
-    if (state.externalSubtitles.isNotBlank()) {
-      val externalSubUris = state.externalSubtitles.split("|").filter { it.isNotBlank() }
-      Log.d(TAG, "Restoring ${externalSubUris.size} external subtitle(s)")
-
-      // 已经被跟踪的（例如刚被下载目录扫描加过）不会再下发 sub-add，等轨道数时要按
-      // 实际会新增的条数算，否则会白等一个超时。
-      val pendingCount = externalSubUris.count { !viewModel.externalSubtitles.contains(it) }
-      val tracksBefore = PlayerLib.getPropertyInt("track-list/count") ?: 0
-
-      for (subUri in externalSubUris) {
-        // 用可挂起的版本：加完再往下，不再即发即忘
-        viewModel.loadSubtitle(Uri.parse(subUri), select = false, silent = true)
-      }
-
-      if (pendingCount > 0) {
-        viewModel.awaitTrackCountAtLeast(tracksBefore + pendingCount)
-      }
-    }
-
-    // 字幕轨的选中**不在这里做**：此刻「同名外挂字幕自动加载」可能还没挂上，
-    // 统一留到 applyRestoredSubtitleSelection()（排在自动加载之后）一次套准。
-    // 音轨不依赖异步添加，照旧在这里恢复。
-    if (state.aid > 0) {
-      player.aid = state.aid
-      Log.d(TAG, "Restored audio track: ${state.aid} (user selection)")
-    }
-
-    PlayerLib.setPropertyDouble("sub-delay", subDelay)
-    PlayerLib.setPropertyDouble("secondary-sub-delay", subDelay)
-    PlayerLib.setPropertyDouble("speed", state.playbackSpeed)
-    PlayerLib.setPropertyDouble("audio-delay", audioDelay)
+  private fun applyPlaybackState(state: PlaybackStateEntity?) {
+    if (state == null) return
+    PlayerLib.setPropertyDouble("sub-delay", state.subDelay / DELAY_DIVISOR)
+    PlayerLib.setPropertyDouble("secondary-sub-delay", state.subDelay / DELAY_DIVISOR)
+    PlayerLib.setPropertyDouble("audio-delay", state.audioDelay / DELAY_DIVISOR)
     PlayerLib.setPropertyDouble("sub-speed", state.subSpeed)
     PlayerLib.setPropertyDouble("secondary-sub-speed", state.subSpeed)
-
-    when {
-      // 显式「从头播放」：本地续播记录一律不生效（详情页的「从头播放」按钮）
-      playFromStart -> {
-        PlayerLib.setPropertyInt("time-pos", 0)
-        Log.d(TAG, "play_from_start: ignore saved position (${state.lastPosition}s), seek to 0")
-      }
-
-      playerPreferences.savePositionOnQuit.get() && state.lastPosition != 0 -> {
-        val saved = state.lastPosition.toDouble()
-        val duration = PlayerLib.getPropertyDouble("duration")
-        // 续播位置离片尾太近（例如上一次是"播完/假播完"退出的，位置就停在 duration 上）：
-        // 直接从头放。否则一开局就被 seek 到结束点，IJK 立刻回调播放完成，
-        // 上层把它当成「播放结束」自动退出 —— 表现就是"一进播放器就被踢回详情页"。
-        val tooCloseToEnd = duration != null && duration > 0.0 && duration - saved < RESUME_TAIL_GUARD_SEC
-        if (tooCloseToEnd) {
-          Log.w(
-            TAG,
-            "saved position ${saved}s is within $RESUME_TAIL_GUARD_SEC s of the end ($duration s); restart from 0",
-          )
-          PlayerLib.setPropertyInt("time-pos", 0)
-        } else {
-          PlayerLib.setPropertyInt("time-pos", state.lastPosition)
-        }
-      }
-    }
   }
 
   /**
@@ -3529,11 +2939,7 @@ private fun cancelAutoplayCountdown() {
     }
   }
 
-  /**
-   * Saves the currently playing file to recently played history.
-   *
-   * Handles various URI schemes and infers launch source.
-   */
+  /** Restores system bars for the transition to picture-in-picture. */
   private fun enterPipUIMode() {
     window.clearFlags(WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS)
     WindowCompat.setDecorFitsSystemWindows(window, true)
@@ -3958,6 +3364,11 @@ private fun cancelAutoplayCountdown() {
   internal fun currentPlaybackServerForUi(): EmbyServer? = runCatching { currentPlaybackServer() }.getOrNull()
 
   private fun synchronizeNativePlaylistIndex(index: Int) {
+    // Native navigation has already replaced the file; never read new native state under old identity.
+    lastPlaybackSnapshot?.let(playbackStateWriter::enqueue)
+    playbackRestoreJob?.cancel()
+    cancelSkipSegmentWatcher()
+    loadedPlaybackIdentity = null
     val uri = playlist.getOrNull(index) ?: return
     playlistIndex = index
     intent.data = uri
@@ -3965,7 +3376,7 @@ private fun cancelAutoplayCountdown() {
     playbackUrl = uri.toString()
     fileName = getPlaylistTitleAt(index) ?: getFileNameFromUri(uri)
     mediaIdentifier = getMediaIdentifierFromUri(uri, fileName)
-    refreshSeriesKey()
+    viewModel.beginPlaybackItem(mediaIdentifier)
     notifyDanmakuEpisodeChanged(index)
     viewModel.onLoadingNewFile()
     PlayerLib.setPropertyString("force-media-title", fileName)
@@ -4009,26 +3420,26 @@ private fun cancelAutoplayCountdown() {
       "load index=$index/${playlist.size} prev='$fileName' uri=${playlist[index]}",
     )
 
-    // Save current video's playback state before switching
-    if (fileName.isNotBlank()) {
-      saveVideoPlaybackState(fileName)
-    }
+    // Loaded identity and native state must be captured before deriving the requested next entry.
+    saveVideoPlaybackState()
+    cancelSkipSegmentWatcher()
+    playbackRestoreJob?.cancel()
 
     val playableUri = uri.toString()
     remoteIsoRejected = false
     viewModel.clearPlaybackError()
 
-    // Update playlist index before deriving the next item's metadata and memory key.
+    // Update playlist index before deriving the next item's metadata.
     playlistIndex = index
     intent.data = uri
     intent.putExtra(PlayerHandoff.EXTRA_INDEX, index)
-    refreshSeriesKey()
 
     // Extract and set the new file name
     // 优先用发起方给的标题（Emby 等网络流 URL 末段是 "stream"，直译会得到假标题）
     fileName = getPlaylistTitleAt(index) ?: getFileNameFromUri(uri)
     // Generate new media identifier for playback state
     mediaIdentifier = getMediaIdentifierFromUri(uri, fileName)
+    viewModel.beginPlaybackItem(mediaIdentifier)
 
     // 弹幕：换集 = 重新匹配。内部会先取消上一次加载，
     // 否则上一集的慢响应会回来覆盖这一集（竞态）。
@@ -4148,13 +3559,6 @@ private fun cancelAutoplayCountdown() {
 
   companion object {
     /**
-     * 「本次加载没有字幕存档」的哨兵值。用 [Int.MIN_VALUE] 而不是 0 / -1：
-     * mpv 的空轨道（`sid=no`）读回来就是 -1，必须和「压根没有存档」区分开 ——
-     * 前者要如实恢复成「字幕关着」，后者则完全不该碰字幕选择。
-     */
-    private const val NO_SAVED_SUBTITLE_SELECTION = Int.MIN_VALUE
-
-    /**
      * 通知栏封面截图的宽度（像素）（清单 #20 必修 4）。
      *
      * 原来是 `grabThumbnail(1080)` —— **按高度还是宽度不确定**，但无论哪个，
@@ -4168,23 +3572,6 @@ private fun cancelAutoplayCountdown() {
      * 省下的是实打实的 4 倍内存 + 4 倍拷贝时间，而这份内存是**要一直挂在进程上**的。
      */
     private const val NOTIFICATION_THUMBNAIL_SIZE = 640
-
-    /**
-     * Constant for "brightness not set".
-     */
-    private const val BRIGHTNESS_NOT_SET = -1f
-
-    /**
-     * `onDestroy` 里等存档协程收尾的上限（毫秒）（清单 #20）。
-     *
-     * 原本是 `runBlocking { job.join() }` **无限等**，在慢机器 / 数据库锁 /
-     * 磁盘满的时候会直接 ANR。留一个上限后最坏情况是「进度晚一点到账」，
-     * 而晚到账本身不会丢数据（onPause 退出那次已经同步写过一遍）。
-     *
-     * 取 500ms：要能覆盖 Room 首次建表 + WAL fsync 的典型耗时，
-     * 又不至于让用户看着「退出应用」明显卡顿。
-     */
-    private const val SAVE_JOIN_BUDGET_MS = 500L
 
     /**
      * 等 mpv 进入 idle 的上限（毫秒）（清单 #20）。
@@ -4267,19 +3654,6 @@ private fun cancelAutoplayCountdown() {
     private const val DURATION_OVERSIZE_FACTOR = 8.0
 
     /**
-     * 续播位置离片尾小于这个秒数就视为"已经看完"，从头开始播。
-     *
-     * 防止把 `-1` 秒级的续播位置写进播放器：那样会让 mpv 一开局就 seek 到结束点，
-     * IJK 立刻回调播放完成，上层按「播放结束」把 Activity 关掉。
-     */
-    private const val RESUME_TAIL_GUARD_SEC = 5.0
-
-    /**
-     * Default playback speed (1.0 = normal).
-     */
-    private const val DEFAULT_PLAYBACK_SPEED = 1.0
-
-    /**
      * Default subtitle speed (1.0 = normal).
      */
     private const val DEFAULT_SUB_SPEED = 1.0
@@ -4298,12 +3672,8 @@ private fun PlayerLoadingOverlay(
   viewModel: PlayerViewModel,
   modifier: Modifier = Modifier,
 ) {
-  val playerPrefs = koinInject<PlayerPreferences>()
-  val showLoadingCircle by playerPrefs.showLoadingCircle.collectAsState()
   val loading by viewModel.loadingState.collectAsState()
   val percent = loading.percent
-
-  if (!showLoadingCircle) return
 
   AnimatedVisibility(
     visible = loading.visible,

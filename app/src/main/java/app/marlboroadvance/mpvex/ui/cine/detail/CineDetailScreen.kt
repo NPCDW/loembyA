@@ -63,8 +63,6 @@ import app.marlboroadvance.mpvex.domain.emby.EmbyPerson
 import app.marlboroadvance.mpvex.domain.emby.EmbyRepository
 import app.marlboroadvance.mpvex.domain.emby.EmbyTicks
 import app.marlboroadvance.mpvex.domain.emby.displayTitle
-import app.marlboroadvance.mpvex.preferences.BrowserPreferences
-import app.marlboroadvance.mpvex.preferences.preference.collectAsState
 import app.marlboroadvance.mpvex.ui.browser.emby.EmbyDetailCache
 import app.marlboroadvance.mpvex.ui.browser.emby.EmbyDetailScreen
 import app.marlboroadvance.mpvex.ui.browser.emby.EmbyPersonScreen
@@ -102,7 +100,6 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
-import org.koin.compose.koinInject
 
 /**
  * Cine 详情页：剧照 + 居中信息块 + 横滑分集。
@@ -145,8 +142,6 @@ fun CineDetailScreen(
   val scope = rememberCoroutineScope()
   val server by viewModel.currentServer.collectAsState()
   CompositionLocalProvider(LocalEmbyImageServer provides server) {
-  val prefs = koinInject<BrowserPreferences>()
-  val showRecommendations by prefs.embyShowRecommendations.collectAsState()
 
   val wide = rememberCineWide()
   val space = CineTheme.space
@@ -248,11 +243,11 @@ fun CineDetailScreen(
     }
   }
 
-  // 相似推荐：与 Classic 同一套算法与开关（设置里关掉就连请求都不发）
-  LaunchedEffect(item?.Id, server?.id, showRecommendations) {
+  // 旧 fallback 详情使用服务端推荐；共用 Movie/Series/Season/Episode 详情仍跳过。
+  LaunchedEffect(item?.Id, server?.id) {
     val current = item ?: return@LaunchedEffect
     val currentServer = server ?: return@LaunchedEffect
-    if (showRecommendations && !current.Type.equals("Series", ignoreCase = true) &&
+    if (!current.Type.equals("Series", ignoreCase = true) &&
       !current.Type.equals("Season", ignoreCase = true) && !current.Type.equals("Episode", ignoreCase = true) &&
       !current.Type.equals("Movie", ignoreCase = true)
     ) {
@@ -525,11 +520,11 @@ fun CineDetailScreen(
               }
             }
 
-            if (showRecommendations && similar.isNotEmpty()) {
+            if (similar.isNotEmpty()) {
               item(key = "similar") {
                 val similarUi = remember(server, similar) {
                   val current = server ?: return@remember emptyList<CineMediaUi>()
-                  similar.take(12).map { viewModel.toCineMedia(current, it.item) }
+                  similar.take(12).map { viewModel.toCineMedia(current, it) }
                 }
                 Column {
                   Spacer(Modifier.height(space.sectionGap))

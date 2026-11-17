@@ -56,7 +56,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import `is`.xyz.mpv.MPVLib
 import app.marlboroadvance.mpvex.preferences.AudioPreferences
 import app.marlboroadvance.mpvex.preferences.GesturePreferences
 import app.marlboroadvance.mpvex.preferences.PlayerPreferences
@@ -105,10 +104,8 @@ fun GestureHandler(
   val audioPreferences = koinInject<AudioPreferences>()
   val gesturePreferences = koinInject<GesturePreferences>()
   val panelShown by viewModel.panelShown.collectAsState()
-  val allowGesturesInPanels by playerPreferences.allowGesturesInPanels.collectAsState()
   val paused by PlayerLib.propBoolean["pause"].collectAsState()
   val duration by PlayerLib.propInt["duration"].collectAsState()
-  val playbackSpeed by PlayerLib.propFloat["speed"].collectAsState()
   val controlsShown by viewModel.controlsShown.collectAsState()
   val areControlsLocked by viewModel.areControlsLocked.collectAsState()
   val seekAmount by viewModel.doubleTapSeekAmount.collectAsState()
@@ -177,7 +174,7 @@ fun GestureHandler(
         if (useSingleTapForCenter && isCenterTap) {
           viewModel.handleCenterSingleTap()
         } else {
-          if (panelShown != Panels.None && !allowGesturesInPanels) {
+          if (panelShown != Panels.None) {
             viewModel.panelShown.update { Panels.None }
           }
           if (controlsShown) {
@@ -490,15 +487,16 @@ fun GestureHandler(
           var lastMPVVolumeValue = currentMPVVolume ?: 100
           var lastBrightnessValue = currentBrightness
 
-          // Original speed for long press
-          var originalSpeed = playbackSpeed ?: 1f
+          // Temporary speed changes belong only to the item that received this touch.
+          val speedItemGeneration = viewModel.playbackItemGeneration
+          var originalSpeed = viewModel.sessionPlaybackSpeed
 
           // Track long press separately
           var longPressTriggered = false
           val longPressDelay = 500L
           var longPressJob = coroutineScope.launch {
             delay(longPressDelay)
-            if (!longPressTriggered && paused == false) {
+            if (!longPressTriggered && paused == false && speedItemGeneration == viewModel.playbackItemGeneration) {
               val distance = sqrt(
                 (down.position.x - startPosition.x) * (down.position.x - startPosition.x) +
                 (down.position.y - startPosition.y) * (down.position.y - startPosition.y)
@@ -509,7 +507,7 @@ fun GestureHandler(
                 isLongPressing = true
                 longPressTriggeredDuringTouch = true
                 if (hapticFeedbackEnabled) haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                originalSpeed = playbackSpeed ?: 1f
+                originalSpeed = viewModel.sessionPlaybackSpeed
                 // Ramp speed up incrementally to avoid audio filter stutter
                 val startSpeed = originalSpeed
                 val targetSpeed = multipleSpeedGesture
@@ -518,7 +516,7 @@ fun GestureHandler(
                 for (i in 1..steps) {
                   val t = i.toFloat() / steps
                   val intermediateSpeed = startSpeed + (targetSpeed - startSpeed) * t
-                  PlayerLib.setPropertyFloat("speed", intermediateSpeed)
+                  if (!viewModel.applyTemporaryPlaybackSpeed(speedItemGeneration, intermediateSpeed)) return@launch
                   if (i < steps) delay(stepDelay)
                 }
 
@@ -623,7 +621,7 @@ fun GestureHandler(
                               haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             }
                             lastAppliedSpeed = newSpeed
-                            PlayerLib.setPropertyFloat("speed", newSpeed)
+                            if (!viewModel.applyTemporaryPlaybackSpeed(speedItemGeneration, newSpeed)) return@forEach
                             viewModel.playerUpdate.update { PlayerUpdates.DynamicSpeedControl(newSpeed, true) }
                           }
                         }
@@ -646,7 +644,7 @@ fun GestureHandler(
                         val changeBrightness: () -> Unit = {
                           val newBrightness = (originalBrightness + fractionDelta).coerceIn(0f, 1f)
                           if (abs(newBrightness - lastBrightnessValue) > 0.001f) {
-                            viewModel.changeBrightnessTo(newBrightness, persist = false)
+                            viewModel.changeBrightnessTo(newBrightness)
                             lastBrightnessValue = newBrightness
                           }
                           viewModel.displayBrightnessSlider()
@@ -677,7 +675,6 @@ fun GestureHandler(
                   "vertical" -> {
                     if (brightnessGesture || volumeGesture) {
                       isVerticalGestureActive = false
-                      viewModel.persistBrightness(lastBrightnessValue)
                       lastMPVVolumeValue = currentMPVVolume ?: 100
                       lastBrightnessValue = currentBrightness
                     }
@@ -705,7 +702,7 @@ fun GestureHandler(
               for (i in 1..steps) {
                 val t = i.toFloat() / steps
                 val intermediateSpeed = currentSpeed + (targetSpeed - currentSpeed) * t
-                PlayerLib.setPropertyFloat("speed", intermediateSpeed)
+                if (!viewModel.applyTemporaryPlaybackSpeed(speedItemGeneration, intermediateSpeed)) return@launch
                 if (i < steps) delay(stepDelay)
               }
             }
@@ -716,7 +713,6 @@ fun GestureHandler(
             "vertical" -> {
               if (brightnessGesture || volumeGesture) {
                 isVerticalGestureActive = false
-                viewModel.persistBrightness(lastBrightnessValue)
                 lastMPVVolumeValue = currentMPVVolume ?: 100
                 lastBrightnessValue = currentBrightness
               }

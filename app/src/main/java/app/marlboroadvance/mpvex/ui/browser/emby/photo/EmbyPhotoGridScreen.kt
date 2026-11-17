@@ -1,7 +1,6 @@
 package app.marlboroadvance.mpvex.ui.browser.emby.photo
 
 import android.app.Application
-import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
@@ -20,7 +19,6 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.GridView
-import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -52,7 +50,6 @@ import app.marlboroadvance.mpvex.preferences.BrowserPreferences
 import app.marlboroadvance.mpvex.preferences.preference.collectAsState
 import app.marlboroadvance.mpvex.presentation.Screen
 import app.marlboroadvance.mpvex.ui.browser.emby.EmbyViewModel
-import app.marlboroadvance.mpvex.ui.browser.emby.rememberPredictivePreloadDistance
 import app.marlboroadvance.mpvex.ui.theme.AppLoadingIndicator
 import app.marlboroadvance.mpvex.ui.utils.LocalBackStack
 import app.marlboroadvance.mpvex.ui.utils.scrollToTop
@@ -74,9 +71,8 @@ import org.koin.compose.koinInject
  * 而上滑时那点留白会跟着滚走，卡片就压到按钮底下了（真机反馈）；
  * 上下两行是真正的「安全区」—— 图区从工具行**下方**开始，怎么滑都进不去。
  *
- * 与视频媒体库页的刻意差异（需求锁定，见 photo.md 方案）：
- * - 工具行只有：数量 + **随机播放图片** + 列数 + 排序。
- *   没有视界流 / 随机播放(视频) / 随机播放收藏 / 筛选 —— 那些对照片没有意义。
+ * 与视频媒体库页的刻意差异：
+ * - 工具行只有：数量 + 列数 + 排序。
  * - 网格是**统一等比**的（每张卡同一尺寸、缩略图 Crop 填满），
  *   不再是「高度随原图比例」的瀑布流 —— 后者横竖图并排大小差一倍，观感很乱。
  *
@@ -291,14 +287,12 @@ data class EmbyPhotoGridScreen(
       fetchPage(reset = true)
     }
 
-    // 滑到距末尾 prefetchDistance 个以内续页（「预测性懒加载」开关：开 ≈ 一屏 / 关 ≈ 贴近末尾）。
-    // consumed 进 key：每拉一页都要重新判一次
-    val prefetchDistance = rememberPredictivePreloadDistance(browserPreferences)
-    val nearEnd by remember(prefetchDistance) {
+    // 距离末尾 2 个条目时续页；consumed 进 key，每拉一页都重新判一次。
+    val nearEnd by remember {
       derivedStateOf {
         val info = gridState.layoutInfo
         val last = info.visibleItemsInfo.lastOrNull()?.index ?: -1
-        info.totalItemsCount > 0 && last >= info.totalItemsCount - prefetchDistance
+        info.totalItemsCount > 0 && last >= info.totalItemsCount - 2
       }
     }
     LaunchedEffect(nearEnd, consumed) {
@@ -374,7 +368,7 @@ data class EmbyPhotoGridScreen(
           .fillMaxSize()
           .padding(innerPadding),
       ) {
-        // ── 工具行：数量 + 随机播放图片 + 列数 + 排序 ──
+        // ── 工具行：数量 + 列数 + 排序 ──
         // 它是 Column 的**第一行，占自己的高度**，图区从它下面开始 ——
         // 这样上滑时卡片不会压到按钮上（「安全区」的真做法）。
         // 以前它是叠在图区之上的悬浮条，靠网格自己留白让位：留白会跟着滚走，
@@ -397,46 +391,6 @@ data class EmbyPhotoGridScreen(
             modifier = Modifier.weight(1f),
             maxLines = 1,
           )
-          // 随机播放图片：相册态随机本相册内、库根态随机整个库（递归拉平），
-          // 条数走「随机播放数量」偏好（与视频随机播放同一个设置）
-          IconButton(onClick = {
-            val current = server ?: return@IconButton
-            scope.launch {
-              val result = runCatching {
-                withContext(Dispatchers.IO) {
-                  vm.loadPhotos(
-                    current,
-                    parentId(),
-                    sortBy = "Random",
-                    sortOrder = null,
-                    // 与视频随机播放同一个数量设置；夹在 1..500，
-                    // 偏好被外部改坏时也不至于拉 0 条或把服务端打挂
-                    limit = browserPreferences.randomPlayCount.get().coerceIn(1, 500),
-                  )
-                }
-              }
-              result.onSuccess { res ->
-                val photos = res.Items.filter { it.Type == "Photo" || it.Type == null }
-                if (photos.isEmpty()) {
-                  Toast.makeText(context, "这里没有照片", Toast.LENGTH_SHORT).show()
-                } else {
-                  backStack.add(
-                    EmbyPhotoBrowserScreen(
-                      initialPhotos = photos,
-                      initialConsumedCount = res.consumedCount,
-                      initialIndex = 0,
-                      parentId = parentId(),
-                      title = album?.Name ?: title,
-                    ),
-                  )
-                }
-              }.onFailure {
-                Toast.makeText(context, "加载失败，稍后再试", Toast.LENGTH_SHORT).show()
-              }
-            }
-          }) {
-            Icon(Icons.Default.Shuffle, contentDescription = "随机播放图片")
-          }
           // 列数 2 / 3 / 4
           Box {
             IconButton(onClick = { showColumnsMenu = true }) {

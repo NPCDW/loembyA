@@ -1,6 +1,5 @@
 package app.marlboroadvance.mpvex.ui.player
 import app.marlboroadvance.mpvex.ui.player.engine.PlayerLib
-import app.marlboroadvance.mpvex.ui.player.engine.VideoCrop
 
 import android.content.Context
 import android.content.Intent
@@ -16,12 +15,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.CreationExtras
-import app.marlboroadvance.mpvex.R
 import app.marlboroadvance.mpvex.preferences.AudioPreferences
 import app.marlboroadvance.mpvex.preferences.GesturePreferences
 import app.marlboroadvance.mpvex.preferences.PlayerPreferences
 import app.marlboroadvance.mpvex.preferences.SubtitlesPreferences
-import `is`.xyz.mpv.MPVLib
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.CoroutineScope
@@ -36,7 +33,6 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -46,7 +42,6 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
-import java.io.File
 import kotlin.math.roundToInt
 import kotlin.properties.ReadOnlyProperty
 import kotlin.reflect.KProperty
@@ -78,41 +73,28 @@ class PlayerViewModel(
   private val subtitlesPreferences: SubtitlesPreferences by inject()
   private val json: Json by inject()
 
-  /**
-   * 「记住每部剧播放设置」的键：Emby 剧集是 SeriesId，电影是 ItemId，本地播放为 null。
-   *
-   * 由 PlayerActivity 从 intent 里读出来后写进来，切集时按下标换成新一集的键。
-   * 用普通字段而不是 StateFlow：它只在「用户改速度 / 选音轨」的回调里被读一次，
-   * 不需要驱动重组。
-   */
-  var seriesKey: String? = null
+  private val sessionSpeed = PlaybackSessionSpeed()
+  val playbackItemGeneration: Long get() = sessionSpeed.generation
+  val sessionPlaybackSpeed: Float get() = sessionSpeed.speed
+
+  fun beginPlaybackItem(identifier: String) {
+    val speed = sessionSpeed.beginItem(identifier, playerPreferences.defaultSpeed.get())
+    PlayerLib.setPropertyFloat("speed", speed)
+  }
+
+  fun changePlaybackSpeed(speed: Float) {
+    PlayerLib.setPropertyFloat("speed", sessionSpeed.changeSpeed(speed))
+  }
+
+  fun applyTemporaryPlaybackSpeed(itemGeneration: Long, speed: Float): Boolean {
+    if (!sessionSpeed.acceptsTemporarySpeed(itemGeneration)) return false
+    PlayerLib.setPropertyFloat("speed", speed)
+    return true
+  }
 
   /** Bound by the host to the actual playback row; never the globally selected server. */
   @Volatile
   var subtitleServer: app.marlboroadvance.mpvex.domain.emby.EmbyServer? = null
-
-  /**
-   * 自动连播下一集前的倒计时剩余秒数；0 表示不显示卡片。
-   *
-   * 播完一集时由播放页起一个每秒递减的协程，卡片上「立即播放 / 取消」
-   * 两个按钮会取消这个协程并把它清零。
-   */
-  val autoplayCountdown = MutableStateFlow(0)
-
-  /** 倒计时卡片里显示的下一集标题（取不到就是 null，卡片只显示秒数） */
-  val autoplayNextTitle = MutableStateFlow<String?>(null)
-
-  /**
-   * 「下一集」悬停卡片是否可见（Yamby 的 `next_up_sec`）。
-   *
-   * 与 [autoplayCountdown] 的区别：那个只在**最后几秒**出现且带数字倒计时、
-   * 是「马上就要切了」的催促；这个提前 30 秒左右出现、不带倒计时，
-   * 是「后面还有一集，要不要现在就看」的提示 —— 长片尾（预告 / 片花）时特别有用。
-   */
-  val nextUpVisible = MutableStateFlow(false)
-
-  /** 「下一集」卡片里显示的标题 */
-  val nextUpTitle = MutableStateFlow<String?>(null)
 
   /**
    * 「跳过片头 / 跳过片尾」小胶囊的文案；null = 不显示。
@@ -431,8 +413,7 @@ class PlayerViewModel(
    *
    * ⇒ 用 `MPV_EVENT_PLAYBACK_RESTART`：mpv 的日志顺序是
    *   `first video frame after restart shown` → `playback-restart`，
-   *   也就是首帧上屏之后才发。这与视界流那条的教训一致
-   *   （见 `FeedViewModel.buffered` 的注释：判据早一步就会「转圈消失→黑屏→画面」）。
+   *   也就是首帧上屏之后才发，避免加载层提前消失后短暂黑屏。
    */
   private val _firstFrameRendered = MutableStateFlow(false)
   val firstFrameRendered: StateFlow<Boolean> = _firstFrameRendered.asStateFlow()
@@ -462,6 +443,7 @@ class PlayerViewModel(
 
   /** 换片 / 重新加载时把「首帧已出」打回 false，让加载层重新出现。 */
   fun onLoadingNewFile() {
+    sessionSpeed.invalidateTemporarySpeed()
     _loadingState.update { it.newFile() }
     _firstFrameRendered.value = false
     _cacheTimelineNode.value = null
@@ -549,7 +531,7 @@ class PlayerViewModel(
   private val mpvPathToUriMap = mutableMapOf<String, String>()
 
   init {
-    // Track selection is now handled by TrackSelector in PlayerActivity
+    // Emby track selection is owned by LoembyPlaybackCoordinator.
     
     // Observe volume boost cap changes to enforce limits dynamically (in PiP)
     viewModelScope.launch {
@@ -588,7 +570,7 @@ class PlayerViewModel(
     /**
      * 拖动进度条期间，两次**真正下发**的 mpv seek 之间的最小间隔。
      *
-     * 视界流 `previewSeek` 同款口径（那边是 120ms）：保住「画面跟手」的同时，
+     * 保住「画面跟手」的同时，
      * 不让每个移动事件都让解码器在网络流上重新定位一遍。拖完的最终落点
      * 不靠节流那条 —— 由 `commitScrubSeek` 在松手时强制保证。
      */
@@ -647,7 +629,7 @@ class PlayerViewModel(
     mpvPathToUriMap.clear()
   }
 
-  /** 用户主动添加外挂字幕（即发即忘）。要「加完再选中」请用 [loadSubtitle]。 */
+  /** 用户主动添加外挂字幕；验证后交给 mpv 添加并按 select 参数选择。 */
   fun addSubtitle(uri: Uri, select: Boolean = true, silent: Boolean = false) {
     val server = subtitleServer
     viewModelScope.launch(Dispatchers.IO) {
@@ -655,17 +637,8 @@ class PlayerViewModel(
     }
   }
 
-  /**
-   * 把外挂字幕真正交给 mpv，**在调用方协程里顺序执行**。
-   *
-   * 与 [addSubtitle] 的唯一区别是「这里是挂起函数」：返回时 `sub-add` 命令已经下发。
-   * 恢复播放状态必须用这个版本 —— `addSubtitle` 是即发即忘的，而恢复流程紧接着就要用
-   * 存档里的 `sid` 选中字幕，那时轨道还没建出来，mpv 会把这次选择当成「不存在的轨道」
-   * 直接丢弃。表现就是「上次加的外挂字幕，重开 app 就没了」。
-   *
-   * 注意：命令下发 ≠ 轨道已就绪。mpv 挂轨道是异步的，之后还要 [awaitTrackCountAtLeast] 等一拍。
-   */
-  internal suspend fun loadSubtitle(
+  /** Loads a manually supplied subtitle through the approved readable-path validation. */
+  private suspend fun loadSubtitle(
     uri: Uri,
     select: Boolean,
     silent: Boolean,
@@ -713,23 +686,6 @@ class PlayerViewModel(
       if (!silent) withContext(Dispatchers.Main) { showToast("已添加 $displayName") }
     }.onFailure {
       if (!silent) withContext(Dispatchers.Main) { showToast("加载字幕失败") }
-    }
-  }
-
-  /**
-   * 等 mpv 的轨道列表涨到至少 [target] 条（最多等 [timeoutMs]）。
-   *
-   * `sub-add` 是异步命令：命令返回那一刻轨道还没进 `track-list`，这时候去设 `sid`
-   * 会被 mpv 当成「不存在的轨道」丢掉。恢复外挂字幕时必须等这一拍。
-   */
-  internal suspend fun awaitTrackCountAtLeast(
-    target: Int,
-    timeoutMs: Long = 1000,
-  ) {
-    val deadline = System.currentTimeMillis() + timeoutMs
-    while (System.currentTimeMillis() < deadline) {
-      if ((PlayerLib.getPropertyInt("track-list/count") ?: 0) >= target) return
-      delay(30)
     }
   }
 
@@ -1072,9 +1028,8 @@ class PlayerViewModel(
    * 为什么不能像 [seekTo] 那样来一次发一次：一次两秒的拖动会打出 60~120 条
    * `seek` 命令，而网络流上每条 seek 的代价是「丢掉已缓存区间 → HTTP Range
    * 重连 → 重新定位 → 从关键帧解码」，新命令还会掐掉没跑完的上一条 —— 整个
-   * 过程被反复推倒重来，缓存被反复清空，观感就是「拖一下卡好久」。视界流的
-   * `previewSeek` 早就用 120ms 节流解决过同一个问题（注释原话：「不至于每个
-   * 移动事件都让解码器重新定位一次」），这里照同款口径处理。
+   * 过程被反复推倒重来，缓存被反复清空，观感就是「拖一下卡好久」。节流避免每个
+   * 移动事件都让解码器重新定位一次。
    *
    * 这里只更新目标并按 [SCRUB_SEEK_INTERVAL_MS] 间隔才真正下发；**最终落点由
    * [commitScrubSeek] 在松手时保证**。老实现里收尾回调不发 seek、完全依赖
@@ -1243,29 +1198,13 @@ class PlayerViewModel(
 
   // ==================== Brightness & Volume ====================
 
-  fun changeBrightnessTo(brightness: Float, persist: Boolean = true) {
+  fun changeBrightnessTo(brightness: Float) {
     val coercedBrightness = brightness.coerceIn(0f, 1f)
     host.hostWindow.attributes =
       host.hostWindow.attributes.apply {
         screenBrightness = coercedBrightness
       }
     currentBrightness.value = coercedBrightness
-    if (persist) persistBrightness(coercedBrightness)
-  }
-
-  fun persistBrightness(brightness: Float = currentBrightness.value) {
-    val coercedBrightness = brightness.coerceIn(0f, 1f)
-    // Save brightness to preferences if enabled
-    if (playerPreferences.rememberBrightness.get()) {
-      playerPreferences.defaultBrightness.set(coercedBrightness)
-    }
-    // 按剧再记一份（对标 Yamby 的 resume_brightness）。
-    // ⚠️ 和全局记忆是**叠加**关系不是二选一：用户可能只想全局固定一个亮度、
-    //   不想某部片单独记住，所以两个开关各自独立判断。
-    // ⚠️ seriesKey 为 null（本地播放 / 网盘）时不写 —— 没有稳定的剧标识可挂。
-    if (playerPreferences.rememberSeriesBrightness.get()) {
-      playerPreferences.setSeriesBrightness(seriesKey, coercedBrightness)
-    }
   }
 
   fun displayBrightnessSlider() {
@@ -1440,91 +1379,6 @@ class PlayerViewModel(
 
   fun playPrevious() {
     (host as? PlayerActivity)?.playPrevious()
-  }
-
-  // ==================== 黑边自动裁切（cropdetect） ====================
-
-  /** 当前是否已应用自动裁切，供 UI 显示状态。 */
-  private val _isAutoCropped = MutableStateFlow(false)
-  val isAutoCropped: StateFlow<Boolean> = _isAutoCropped.asStateFlow()
-
-  /** 探测协程。同一时刻只允许一条，避免连点叠加出多条 cropdetect 滤镜。 */
-  private var cropJob: Job? = null
-
-  /**
-   * 手动「自动裁黑边 / 还原」。
-   *
-   * 已在裁切状态时点击即还原 —— 探测不准（比如把暗场戏当成黑边）时用户能一键退回去。
-   */
-  fun toggleAutoCrop() {
-    if (VideoCrop.isApplied) {
-      VideoCrop.clear()
-      _isAutoCropped.value = false
-      playerUpdate.value = PlayerUpdates.ShowText(host.context.getString(R.string.player_crop_off))
-      return
-    }
-    runAutoCrop(userInitiated = true)
-  }
-
-  /**
-   * 「自动裁黑边」开关：写偏好并**立即**生效。
-   *
-   * 打开 → 马上对当前画面探测一次（不等下一次换片）；
-   * 关闭 → 立刻摘掉已挂上的裁切，不然用户看着开关是关的、画面却还裁着。
-   */
-  fun setAutoCrop(enabled: Boolean) {
-    playerPreferences.autoCropBlackBars.set(enabled)
-    if (enabled) {
-      runAutoCrop(userInitiated = true)
-    } else {
-      cropJob?.cancel()
-      cropJob = null
-      VideoCrop.clear()
-      _isAutoCropped.value = false
-      playerUpdate.value = PlayerUpdates.ShowText(host.context.getString(R.string.player_crop_off))
-    }
-  }
-
-  /**
-   * 每次加载新文件后按偏好套用裁切策略。
-   *
-   * - 开关打开 → 探测并裁切；
-   * - 开关关闭 → **主动清一次**：上一条片子的裁切滤镜会留在 mpv 的 vf 链上，
-   *   不清的话新片会带着上一条的黑边偏移继续播。
-   */
-  fun applyAutoCropPolicy() {
-    if (playerPreferences.autoCropBlackBars.get()) {
-      runAutoCrop(userInitiated = false)
-    } else {
-      VideoCrop.clear()
-      _isAutoCropped.value = false
-    }
-  }
-
-  private fun runAutoCrop(userInitiated: Boolean) {
-    if (cropJob?.isActive == true) return
-    cropJob =
-      viewModelScope.launch {
-        val crop = VideoCrop.detectAndApply()
-        _isAutoCropped.value = crop != null
-        if (userInitiated) {
-          val msg =
-            if (crop != null) {
-              host.context.getString(R.string.player_crop_applied)
-            } else {
-              host.context.getString(R.string.player_crop_failed)
-            }
-          playerUpdate.value = PlayerUpdates.ShowText(msg)
-        }
-      }
-  }
-
-  /** 播放页退出 / 换内核时把裁切滤镜摘干净。 */
-  fun clearAutoCrop() {
-    cropJob?.cancel()
-    cropJob = null
-    VideoCrop.clear()
-    _isAutoCropped.value = false
   }
 
   // ==================== Utility ====================

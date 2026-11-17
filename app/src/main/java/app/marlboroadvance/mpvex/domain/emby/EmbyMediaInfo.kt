@@ -1,5 +1,6 @@
 package app.marlboroadvance.mpvex.domain.emby
 
+import app.marlboroadvance.mpvex.domain.emby.playback.LoembyMediaSelection
 import kotlin.math.abs
 import kotlin.math.round
 
@@ -31,11 +32,13 @@ sealed interface MediaInfoEntry {
  * 顺序：基本信息（含首次入库 / 文件路径）→ 每个视频轨道 → 每个音频轨道 → 字幕轨道。
  * 值为空的项直接跳过，不会出现「未知 / N/A」这种噪音行。
  *
- * @param selectedMediaSourceId 多版本媒体里**当前选中的版本**；null = 用默认版本（第一条源）。
+ * @param selectedMediaSourceId valid manual selection, otherwise the shared automatic policy applies
+ * @param automaticVersionPolicy shared loemby playback policy
  */
 fun buildEmbyMediaInfoEntries(
   item: EmbyItem,
   selectedMediaSourceId: String? = null,
+  automaticVersionPolicy: String = "high-resolution",
 ): List<MediaInfoEntry> {
   val out = mutableListOf<MediaInfoEntry>()
 
@@ -47,15 +50,12 @@ fun buildEmbyMediaInfoEntries(
     out += MediaInfoEntry.Section(title)
   }
 
-  // ── 基本信息 ──
-  // 多版本媒体：取「当前选中版本」对应的源，而不是永远拿第一条。
-  // 版本名 / 容器 / 文件大小 / 总码率 / 音视频轨道都随切换而变；选中 Id 失效时回退第一条，
-  // 与播放侧 effectiveEmbyMediaSourceId 的兜底规则保持一致。
+  // A valid manual ID wins; missing/stale IDs use the same automatic ranking as playback.
   val allSources = item.MediaSources.orEmpty()
-  val source =
-    effectiveEmbyMediaSourceId(item, selectedMediaSourceId)
-      ?.let { id -> allSources.firstOrNull { it.Id == id } }
-      ?: allSources.firstOrNull()
+  val source = allSources.firstOrNull { !selectedMediaSourceId.isNullOrBlank() && it.Id == selectedMediaSourceId }
+    ?: allSources.takeIf { it.isNotEmpty() }?.let {
+      it[LoembyMediaSelection.selectAutomaticSourceIndex(it, automaticVersionPolicy)]
+    }
 
   if (allSources.count { !it.Id.isNullOrBlank() } > 1 && source != null) {
     add("版本", embyMediaSourceLabel(source))
@@ -66,7 +66,7 @@ fun buildEmbyMediaInfoEntries(
   // 所以给老条目补一个新版本后这里仍是老日期；措辞用「首次入库」，别让人当成当前版本的时间。
   add("首次入库", formatIsoDate(item.DateCreated))
   add("首播日期", formatIsoDate(item.PremiereDate))
-  add("时长", item.RunTimeTicks?.takeIf { it > 0 }?.let { formatEmbyDurationFull(it) })
+  add("时长", (source?.RunTimeTicks ?: item.RunTimeTicks)?.takeIf { it > 0 }?.let { formatEmbyDurationFull(it) })
   add("年份", item.ProductionYear?.toString())
   add("分级", item.OfficialRating)
   add("评分", item.CommunityRating?.let { "★ %.1f".format(it) })
@@ -145,32 +145,20 @@ fun buildEmbyMediaInfoEntries(
 }
 
 /**
- * 多版本媒体：算出「这次实际要用的版本 Id」。
- *
- * 只有确实存在多个版本时才返回非空 —— 单版本媒体返回 null，播放 URL 里就不会带
- * `MediaSourceId`，行为与改动前完全一致。
- *
- * ## 优先级：**用户手动选 > 设置里的规则 > 服务端默认**
- *
- * · 用户在下拉框里选过（[selected] 非空且能对上）⇒ 永远尊重用户，不看规则。
- *   这是最重要的一条：规则是「省去每次都去点下拉框」，不是「推翻用户的选择」。
- * · 没选过 ⇒ 按 [preference] 规则自动挑（见 [selectPreferredMediaSourceId]）。
- *   规则判不出来（DEFAULT / 字段全缺）时回退首条源，与 Emby 服务端的默认一致。
- *
- * ⚠️ 选中的 Id 失效时（刷新后源被换掉）同样回退 —— 但要**重新过一次规则**，
- * 否则会出现「规则说选 4K，结果拿到的是失效 id 对应的兜底首条」。
+ * Effective multiversion ID for detail information and local version progress.
+ * A valid manual selection wins; otherwise use the same shared automatic policy as playback.
+ * A single source needs no explicit ID. Unknown policy values retain server response order.
  */
 fun effectiveEmbyMediaSourceId(
   item: EmbyItem?,
   selected: String?,
-  preference: MediaSourcePreference = MediaSourcePreference.DEFAULT,
+  automaticVersionPolicy: String = "high-resolution",
 ): String? {
-  val sources = item?.MediaSources.orEmpty().filter { !it.Id.isNullOrBlank() }
+  val sources = item?.MediaSources.orEmpty()
   if (sources.size <= 1) return null
-  // 1. 用户显式选过的版本优先。
-  sources.firstOrNull { it.Id == selected }?.let { return it.Id }
-  // 2. 没选过 ⇒ 按规则自动挑。
-  return selectPreferredMediaSourceId(sources, preference) ?: sources.first().Id
+  sources.firstOrNull { !selected.isNullOrBlank() && it.Id == selected }?.let { return it.Id }
+  val index = LoembyMediaSelection.selectAutomaticSourceIndex(sources, automaticVersionPolicy)
+  return sources[index].Id?.takeIf { it.isNotBlank() }
 }
 
 /**

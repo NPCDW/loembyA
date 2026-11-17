@@ -35,7 +35,6 @@ import app.marlboroadvance.mpvex.domain.emby.playback.LoopbackPlaybackServer
 import app.marlboroadvance.mpvex.domain.emby.playback.PlaybackDetailOrigin
 import app.marlboroadvance.mpvex.domain.emby.playback.PlaybackSpec
 import app.marlboroadvance.mpvex.domain.emby.EmbyTicks
-import app.marlboroadvance.mpvex.domain.emby.StreamProbe
 import app.marlboroadvance.mpvex.domain.emby.displayTitle
 import app.marlboroadvance.mpvex.domain.emby.primaryImageRef
 import app.marlboroadvance.mpvex.preferences.BrowserPreferences
@@ -54,9 +53,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -105,6 +102,15 @@ internal fun requireExplicitPlaybackSource(
 ) {
   if (mediaSourceId != null) EmbyMediaSourcePolicy.requirePlayableSource(item, mediaSourceId, url)
 }
+
+/** Manual selections belong to the clicked item; the direct-link choice belongs to the whole launch queue. */
+internal fun PlaybackSpec.forLaunchQueueEntry(
+  isCurrent: Boolean,
+  selectionCurrentItemOnly: Boolean,
+): PlaybackSpec = forPlaylistEntry(
+  isCurrent = isCurrent,
+  selectionCurrentItemOnly = selectionCurrentItemOnly || !isCurrent,
+)
 
 /** Pure pagination core used by playback and JVM tests. Offsets always follow raw server consumption. */
 internal suspend fun collectEpisodePlaylist(
@@ -750,14 +756,6 @@ class EmbyViewModel(application: Application, private val boundServer: EmbyServe
     return !data.Played && data.PlaybackPositionTicks > 0
   }
 
-  suspend fun loadRandom(
-    server: EmbyServer,
-    parentId: String? = null,
-    includeItemTypes: List<String>? = null,
-    limit: Int = 50,
-    isFavorite: Boolean? = null,
-  ): List<EmbyItem> = repository.getRandomItems(server, parentId, includeItemTypes, limit, isFavorite).Items
-
   suspend fun loadItemDetail(server: EmbyServer, itemId: String): EmbyItem =
     repository.getItem(server, itemId)
 
@@ -811,7 +809,7 @@ class EmbyViewModel(application: Application, private val boundServer: EmbyServe
    *
    * [sortBy] / [sortOrder] 由媒体库工具行上的排序按钮给出：Emby 允许
    * SearchTerm 与 SortBy 组合，所以搜索完再切排序能真的改变结果顺序。
-   * `sortBy = "Random"` 就是「在搜索结果里随机播」用的。
+   * `sortBy = "Random"` 保留为搜索结果的随机排序。
    */
   suspend fun search(
     server: EmbyServer,
@@ -943,37 +941,6 @@ class EmbyViewModel(application: Application, private val boundServer: EmbyServe
       )
     }
 
-
-  /**
-   * 预解析「302 直链」：拿 `/Videos/{id}/stream` 背后跳转到的真实地址。
-   *
-   * 失败返回 null，调用方回退到原始流地址 —— 解析失败绝不挡播放。
-   *
-   * ## 起播路径必须限时
-   * [play] 等待此返回值才拉起播放器；尚未 probe 的 strm 源可能让服务端探测耗时很长。
-   * 使用 [EmbyClient.resolveStreamUrl] 的单次超时且不重试，避免成倍增加起播等待。
-   * 超时按 [StreamProbe.Unknown] 处理，保留原始地址供播放路径解析。
-   */
-  suspend fun resolveDirectUrl(
-    server: EmbyServer,
-    itemId: String,
-    /** 多版本媒体要指定的版本（`MediaSources[i].Id`）；null = 服务端默认版本 */
-    mediaSourceId: String? = null,
-  ): StreamProbe = withContext(Dispatchers.IO) {
-    runCatching {
-      EmbyClient.resolveStreamUrl(
-        server = server,
-        itemId = itemId,
-        // 起播路径上不重试：见上面的说明。
-        attempts = 1,
-        mediaSourceId = mediaSourceId,
-      )
-    }.getOrElse { StreamProbe.Unknown }
-  }
-
-  /** 是否开启「预解析直链」（设置项）。播放路径据此决定要不要多走一次解析。 */
-  fun shouldResolveDirectLink(): Boolean = browserPreferences.embyResolveDirectLink.get()
-
   // ==================== 播放 ====================
 
   /**
@@ -990,7 +957,7 @@ class EmbyViewModel(application: Application, private val boundServer: EmbyServe
     resumeSeconds: Long = 0,
     /**
      * 多版本媒体要播放的那个版本（`item.MediaSources[i].Id`）。
-     * null = 不指定，由服务端挑默认版本（单版本媒体照旧走这条路）。
+     * null = 自动选择，由共享版本策略在 PlaybackInfo 阶段确定。
      */
     mediaSourceId: String? = null,
     /**
@@ -1011,7 +978,7 @@ class EmbyViewModel(application: Application, private val boundServer: EmbyServe
     subtitleSelect: Int = 0,
     selectPolicy: String = "auto",
     versionSelect: Int = 1,
-    useDirectLink: Boolean? = null,
+    useDirectLink: Boolean = false,
     selectionCurrentItemOnly: Boolean = false,
     detailOrigin: PlaybackDetailOrigin? = null,
   ) {
@@ -1113,55 +1080,46 @@ class EmbyViewModel(application: Application, private val boundServer: EmbyServe
     )
   }
 
-  /** 播放一组媒体（剧集连播 / 随机播放）。 */
-  /**
-   * 「随机播放 / 随机播放收藏 / 混合推荐连播 / 演员作品连播」的统一启动入口。
-   * 所有条目注册为本地 loopback PlaybackSpec，由 mpv 按需解析。
-   */
-  fun launchRandomPlayback(
+  /** Play the supplied ordered queue from the beginning without shuffling or resuming any entry. */
+  fun launchFromStartPlayback(
     server: EmbyServer,
     items: List<EmbyItem>,
   ) {
-    if (items.isEmpty()) return
-    viewModelScope.launch { launchRandomPlaybackAwait(server, items) }
+    launchPlaylist(server, items, playFromStartAll = true)
   }
 
-  /** [launchRandomPlayback] 的可等待版本：返回时播放页已经启动。 */
-  suspend fun launchRandomPlaybackAwait(
+  /** Await the ordered from-start launch until the player activity has opened. */
+  suspend fun launchFromStartPlaybackAwait(
     server: EmbyServer,
     items: List<EmbyItem>,
   ) {
-    val items = EmbyItemPolicy.filterSupported(items).filter { it.Id != null }
-    if (items.isEmpty()) return
     launchPlaylistAwait(server, items, playFromStartAll = true)
   }
 
+  /** Play an ordered queue; explicit version selection applies only to its starting item. */
   fun launchPlaylist(
     server: EmbyServer,
     items: List<EmbyItem>,
     resumeSeconds: Long = 0,
-    /**
-     * 整场从头播放（随机播放 / 随机播放收藏专用）。
-     * 随机出来的列表里常混着看过的剧，若切集时恢复本地续播记录，
-     * 已看完的会直接跳到片尾一秒就结束，所以本次会话内每个视频都从头放。
-     */
+    /** Ignore local resume positions for every item in this launch's queue. */
     playFromStartAll: Boolean = false,
-    /**
-     * itemId → 预解析出来的直链。空 map = 全部由 PlaybackSpec 按需解析。
-     */
-    directUrls: Map<String, String> = emptyMap(),
-    /**
-     * 多版本媒体：**首条**（即用户在详情页点播的那一条）要用的版本 Id。
-     * 只作用于首条，后面自动连播的条目各自用默认版本 —— 用户只为当前这条选了版本。
-     */
     firstMediaSourceId: String? = null,
-    /** [firstMediaSourceId] 对应的显示名；播放页顶栏据此显示「正在播的是哪个版本」。 */
     firstMediaSourceName: String? = null,
+    /** Ordinary Play uses Emby streaming; explicit Direct link applies to the entire queue. */
+    useDirectLink: Boolean = false,
   ) {
+    if (items.isEmpty()) return
     viewModelScope.launch {
       try {
-        launchPlaylistAwait(server, items, resumeSeconds, playFromStartAll, directUrls,
-          firstMediaSourceId, firstMediaSourceName)
+        launchPlaylistAwait(
+          server = server,
+          items = items,
+          resumeSeconds = resumeSeconds,
+          playFromStartAll = playFromStartAll,
+          firstMediaSourceId = firstMediaSourceId,
+          firstMediaSourceName = firstMediaSourceName,
+          useDirectLink = useDirectLink,
+        )
       } catch (cancelled: CancellationException) {
         throw cancelled
       } catch (_: Exception) {
@@ -1175,16 +1133,15 @@ class EmbyViewModel(application: Application, private val boundServer: EmbyServe
     items: List<EmbyItem>,
     resumeSeconds: Long = 0,
     playFromStartAll: Boolean = false,
-    directUrls: Map<String, String> = emptyMap(),
     firstMediaSourceId: String? = null,
     firstMediaSourceName: String? = null,
-    startItemId: String? = items.firstOrNull()?.Id,
+    startItemId: String? = items.firstOrNull { !it.Id.isNullOrBlank() && EmbyItemPolicy.isSupported(it) }?.Id,
     videoSelect: Int = 0,
     audioSelect: Int = 0,
     subtitleSelect: Int = 0,
     selectPolicy: String = "auto",
     versionSelect: Int = 1,
-    useDirectLink: Boolean? = null,
+    useDirectLink: Boolean = false,
     selectionCurrentItemOnly: Boolean = false,
     detailOrigin: PlaybackDetailOrigin? = null,
   ) {
@@ -1192,16 +1149,12 @@ class EmbyViewModel(application: Application, private val boundServer: EmbyServe
     val supported = EmbyItemPolicy.filterSupported(items).filter { !it.Id.isNullOrBlank() }
     val current = supported.firstOrNull { it.Id == startItemId } ?: return
     try {
-      requireExplicitPlaybackSource(current, firstMediaSourceId, directUrls[current.Id])
+      requireExplicitPlaybackSource(current, firstMediaSourceId)
     } catch (error: IllegalArgumentException) {
       showPlaybackError(error.message ?: "此媒体源不可播放")
       return
     }
-    val items = supported.filter { candidate ->
-      candidate.Id == startItemId || directUrls[candidate.Id]?.let { url ->
-        !EmbyMediaSourcePolicy.isRemoteIsoUrl(url)
-      } != false
-    }
+    val items = supported
     val startIndex = items.indexOfFirst { it.Id == startItemId }.takeIf { it >= 0 } ?: return
     val uris = ArrayList<android.net.Uri>()
     val ids = ArrayList<String>()
@@ -1246,10 +1199,7 @@ class EmbyViewModel(application: Application, private val boundServer: EmbyServe
           positionTicks = if (index == startIndex && !playFromStartAll) {
             EmbyTicks.secondsToTicks(resumeSeconds)
           } else 0L,
-          useDirectLink = when {
-            index == startIndex && useDirectLink != null -> useDirectLink
-            else -> shouldResolveDirectLink()
-          },
+          useDirectLink = useDirectLink,
           selectPolicy = selectPolicy,
           versionSelect = versionSelect,
           videoSelect = videoSelect,
@@ -1258,9 +1208,8 @@ class EmbyViewModel(application: Application, private val boundServer: EmbyServe
           playlistIndex = index + 1,
           playlistTotal = items.size,
           explicitMediaSourceId = if (index == startIndex) firstMediaSourceId else null,
-          overrideUrl = directUrls[id],
           detailOrigin = detailOrigin,
-        ).forPlaylistEntry(index == startIndex, selectionCurrentItemOnly))
+        ).forLaunchQueueEntry(index == startIndex, selectionCurrentItemOnly))
       }
       uris.add(android.net.Uri.parse(url))
       ids.add(id)
@@ -1288,12 +1237,10 @@ class EmbyViewModel(application: Application, private val boundServer: EmbyServe
       if (resumeSeconds > 0) {
         putExtra("position", (resumeSeconds * 1000).toInt())
       } else {
-        // 显式「从头播放」：告知播放页别再拿本地续播记录覆盖进度。
-        // 否则 savePositionOnQuit 开启时，applyPlaybackState 会把上次停下
-        // 的位置套回 time-pos，「从头播放」就变成了「继续播放」。
+        // 显式「从头播放」不得被本地续播记录覆盖。
         putExtra("play_from_start", true)
       }
-      // 随机播放入口：整个播放会话内切到哪个视频都从头放（不恢复本地续播）
+      // 整场从头播放：队列中每个视频都不恢复本地续播。
       if (playFromStartAll) {
         putExtra("play_from_start_all", true)
       }
@@ -1387,15 +1334,6 @@ class EmbyViewModel(application: Application, private val boundServer: EmbyServe
   /** Full titles use the shared loemby-compatible episode format. */
   fun displayTitle(item: EmbyItem): String = item.displayTitle()
 
-  /** 构造播放地址（用于播放列表等只需要 URL 的场景） */
-  fun getStreamUrl(
-    server: EmbyServer,
-    itemId: String,
-    /** 多版本媒体要指定的版本（`MediaSources[i].Id`）；null = 服务端默认版本 */
-    mediaSourceId: String? = null,
-  ): String =
-    repository.videoStreamUrl(server, itemId, mediaSourceId = mediaSourceId)
-
   fun imageUrl(
     server: EmbyServer,
     item: EmbyItem,
@@ -1448,7 +1386,7 @@ class EmbyViewModel(application: Application, private val boundServer: EmbyServe
     EmbyClient.getPhotoAlbums(server, parentId, startIndex, limit, sortBy, sortOrder)
   }
 
-  /** 照片（Photo）列表；sortBy = "Random" 即随机一批（随机播放入口用） */
+  /** 照片（Photo）列表；支持名称、日期与随机排序。 */
   suspend fun loadPhotos(
     server: EmbyServer,
     parentId: String,
@@ -1734,204 +1672,6 @@ class EmbyViewModel(application: Application, private val boundServer: EmbyServe
     )
   }
 
-  /**
-   * 一次取回「当前这一屏所有文件夹」的宫格封面，按文件夹 Id 分组。
-   *
-   * 存在的理由 —— 给服务端减压：容器条目（Folder / BoxSet / CollectionFolder）自身没有封面，
-   * 只能拿内部子项的缩略图拼宫格。原先是**每个文件夹各发一次** /Items（见 [loadFolderCoverUrls]），
-   * 一个「合集」列表摆 30 个合集就是 30 次请求。这里改成对当前父节点做 Recursive 查询、
-   * 拿子项的 `ParentId` 当分组键 —— 一屏的封面共用这几次请求，请求数从 O(文件夹数) 降到 O(1~3)。
-   *
-   * 三处刻意的收窄（都是为了减压）：
-   * 1. `Fields` 只留 `ParentId,ImageTags` —— 默认那份 `Fields` 带
-   *    `MediaSources` / `Overview` / `People`，一页几百条的响应体能大十几倍，而拼封面一个都用不上。
-   * 2. **多次取样**（每次 [FOLDER_COVER_BATCH_PAGE_SIZE] 条，最多 [FOLDER_COVER_BATCH_MAX_PAGES] 次），
-   *    并且「每个文件夹都凑够 4 张」时立即收工 —— 子项在整棵子树里按名称全局排序时，
-   *    一次取样不够会让排在后面的文件夹一条都摸不到。
-   * 3. 两种取样口径（[random]）：
-   *    - 顺序（`false`）：`SortBy=SortName` 翻页，结果稳定、靠翻页让每个文件夹都分得到；
-   *    - 随机（`true`）：每次都让服务端 `SortBy=Random` **重抽一整批**（`StartIndex` 固定 0），
-   *      所以每次取样拿到的都是**不同的一批条目** —— 这正是「下拉刷新能换一批封面」的关键。
-   *      ⚠️ 随机模式千万别改成「按名称翻页 + 客户端洗牌」：那样每次拿到的是**同一批**条目，
-   *      洗牌只换位置不换内容，用户看到的就是「没换图」（踩过这个坑）。
-   *
-   * ⚠️ 返回的 map **只含「凑满 `perFolder` 张」的文件夹**。不足的一律交白卷，由调用方退回
-   * 单文件夹请求去补齐 —— 这一条是**正确性要求**，不是优化：半成品（1~2 张）一旦交出去，
-   * 卡片看到「已经有封面」就不再兜底，于是明明能凑四个的文件夹只显示 1~2 个宫格。
-   * ⚠️ 与 [loadFolderCoverUrls] 一样会跳过没封面的条目、一路往后凑，所以「前几个没图就整张空白」
-   * 不会发生。
-   *
-   * @param parentId 当前浏览的父节点（媒体库 / 文件夹），即列表接口用的那个 parent
-   * @param folderIds 需要拼封面的文件夹 Id（调用方已按「容器 && 无 Primary 图」筛过）
-   * @param random true＝每个文件夹从候选里**洗牌**取几张（每切一次取样都不同）；
-   *   false＝按名称顺序取前几张。两种都只交出凑满的文件夹。
-   * @param perFolder 每个文件夹要凑几张，宫格用 4 张
-   */
-  suspend fun loadFolderCoverBatch(
-    server: EmbyServer,
-    parentId: String,
-    folderIds: List<String>,
-    random: Boolean = false,
-    perFolder: Int = 4,
-  ): Map<String, List<String>> = runCatching {
-    if (folderIds.isEmpty()) return@runCatching emptyMap()
-    val wanted = folderIds.toHashSet()
-    // 每个文件夹最多留几张候选：只要 4 张，但随机模式要多留一点才有洗牌的余地。
-    val poolSize = if (random) perFolder * FOLDER_COVER_BATCH_POOL_FACTOR else perFolder
-    val pools = LinkedHashMap<String, ArrayList<String>>()
-    // 同一个文件夹内按子项 Id 去重（服务端对 Recursive 查询偶尔会重复返回同一条）
-    val seen = HashMap<String, HashSet<String>>()
-    var startIndex = 0
-    var attempt = 0
-    while (attempt < FOLDER_COVER_BATCH_MAX_PAGES) {
-      attempt++
-      val res = repository.getItems(
-        server = server,
-        parentId = parentId,
-        // 随机模式让服务端重抽（每次一批新样本 ⇒ 刷新真的换图）；顺序模式按名称翻页（稳定、覆盖全）。
-        sortBy = if (random) "Random" else "SortName",
-        sortOrder = if (random) null else "Ascending",
-        includeItemTypes = listOf("Movie", "Episode", "Video", "MusicVideo"),
-        isFolder = false,
-        // ⚠️ 随机排序下 StartIndex 没有意义（每次返回的都是新的一批），固定 0 让服务端一次次重抽。
-        startIndex = if (random) 0 else startIndex,
-        limit = FOLDER_COVER_BATCH_PAGE_SIZE,
-        recursive = true,
-        fields = FOLDER_COVER_FIELDS,
-      )
-      val items = res.Items
-      if (res.consumedCount == 0) break
-      for (child in items) {
-        val pid = child.ParentId ?: continue
-        if (pid !in wanted) continue
-        val pool = pools.getOrPut(pid) { ArrayList(poolSize) }
-        if (pool.size >= poolSize) continue
-        val id = child.Id ?: continue
-        if (!seen.getOrPut(pid) { HashSet() }.add(id)) continue
-        val url = folderCoverUrlFor(server, child, id) ?: continue
-        pool.add(url)
-      }
-      if (!random) startIndex += res.consumedCount
-      // 一个都没落进任何目标文件夹：说明这批条目根本不在这些文件夹下（典型是「合集」——
-      // 它只是虚拟分组，片子的 ParentId 指向各自的媒体库，不指向合集），再取也是白取。
-      if (pools.isEmpty() && items.isNotEmpty()) break
-      // 每个文件夹都凑够 4 张了就收工，别把整库翻完
-      if (pools.count { it.value.size >= perFolder } == wanted.size) break
-      // 服务端可截断 Limit；以原始消费数量和权威总数判断末页。
-      if (res.TotalRecordCount > 0 && startIndex >= res.TotalRecordCount && !random) break
-    }
-    // ⚠️ 只交出**凑满 perFolder 张**的文件夹，不足的宁可交白卷，让卡片走单文件夹兜底去补齐。
-    //   以前把「这一批只扫到 1~2 张」的半成品也交出去，卡片看见 `cached != null` 就不再兜底，
-    //   于是明明能凑四个的文件夹只显示 1~2 个宫格（ bug）。
-    //   —— 交白卷的代价只是那一个文件夹多一次单文件夹请求，总次数仍远低于「每个文件夹各一次」。
-    pools
-      .filterValues { it.size >= perFolder }
-      .mapValues { (_, pool) ->
-        if (random) pool.shuffled().take(perFolder) else pool.take(perFolder)
-      }
-  }.getOrElse { e ->
-    // ⚠️ 取消必须原样抛出，不能当成「没有封面」：调用方（卡片）拿到空列表会写进缓存，
-    // 而「换代被取消」的旧请求正好会在刷新瞬间把封面覆盖成空 —— 就是用户看到的白闪。
-    if (e is kotlin.coroutines.cancellation.CancellationException) throw e
-    emptyMap()
-  }
-
-  /**
-   * 取文件夹内若干子项的封面图 URL，用于给「文件夹」条目拼多宫格封面。
-   *
-   * Emby 的 Folder / CollectionFolder / UserView 这类容器条目自身没有 Primary 图，
-   * 直接请求图片接口会 404（也就是用户看到的「文件夹拿不到封面」）。
-   * 这里改为查文件夹内部的**可播放子项**，取它们的缩略图交给客户端拼宫格。
-   *
-   * 优先 Thumb（横版缩略图，宫格排布更协调），没有则退回 Primary。
-   *
-   * ⚠️ 关键在于**凑足**：以前只取排序后的前 `count` 个，谁没封面就被滤掉 ——
-   * 于是「前四个恰好都没封面」时整个文件夹退回占位图标（空白问题），
-   * 而且第 5 个之后哪怕有图也永远看不到。现在改成：从更大的候选池里**跳过没封面的**，
-   * 一路往后凑，直到凑满 `count` 张或把文件夹翻完为止。
-   *
-   * @param count 最多取几张，宫格用 4 张
-   * @param random true＝随机取样（排序交给服务端的 Random，多次换样本）；false＝按名称顺序固定取前几张。
-   *   两种模式都会跳过无封面条目，只是取样顺序不同。
-   */
-  suspend fun loadFolderCoverUrls(
-    server: EmbyServer,
-    folderId: String,
-    count: Int = 4,
-    random: Boolean = false,
-  ): List<String> = runCatching {
-    val urls = ArrayList<String>(count)
-    // 跨页去重：随机模式靠它避免同一张图重复入选；顺序模式靠它扛服务端可能返回的重复项。
-    val seen = HashSet<String>()
-    // 已消费的**服务端**条目数（不是 [urls] 的大小 —— 去掉无封面的条目后两者不相等）。
-    var consumed = 0
-    var attempt = 0
-    val maxAttempt = if (random) FOLDER_COVER_RANDOM_ATTEMPTS else FOLDER_COVER_MAX_PAGES
-    while (urls.size < count && attempt < maxAttempt) {
-      attempt++
-      val page = repository.getItems(
-        server = server,
-        parentId = folderId,
-        // 随机模式让服务端打乱；顺序模式按名称，结果稳定可预期。
-        sortBy = if (random) "Random" else "SortName",
-        sortOrder = if (random) null else "Ascending",
-        includeItemTypes = listOf("Movie", "Episode", "Video", "MusicVideo"),
-        // 容器（Folder / Series / Season / BoxSet）不能播放、也不该占宫格位置，挡掉。
-        isFolder = false,
-        // 随机模式每次都是新样本，从头取；顺序模式从上次消费处接着翻。
-        startIndex = if (random) 0 else consumed,
-        limit = if (random) FOLDER_COVER_RANDOM_POOL else FOLDER_COVER_PAGE_SIZE,
-        recursive = true,
-      )
-      val items = page.Items
-      if (page.consumedCount == 0) break
-      val before = urls.size
-      for (child in items) {
-        if (urls.size >= count) break
-        val id = child.Id ?: continue
-        if (!seen.add(id)) continue
-        val url = folderCoverUrlFor(server, child, id) ?: continue
-        urls.add(url)
-      }
-      if (random) {
-        // 这一批随机样本一张新图都没带来：要么文件夹里带图的本来就没几张，
-        // 要么服务端忽略了 Random（每次都回同一批）。继续重抽也是白费请求，直接收工。
-        if (urls.size == before && items.isNotEmpty()) break
-        continue
-      }
-      consumed += page.consumedCount
-      // 服务端可能截断 Limit；无总数时继续到原始空页或取样预算结束。
-      if (page.TotalRecordCount > 0 && consumed >= page.TotalRecordCount) break
-    }
-    urls
-  }.getOrElse { e ->
-    // ⚠️ 取消原样抛出：这一条**极重要** —— 调用方拿到空列表会写进缓存，
-    // 于是「下拉刷新时被取消的旧请求」会在新封面还没到之前先把封面覆盖成空（白闪）。
-    if (e is kotlin.coroutines.cancellation.CancellationException) throw e
-    emptyList()
-  }
-
-  /**
-   * 单个子项能用作宫格封面的图片地址：**优先 Thumb**（横版缩略图，宫格排布更协调），
-   * 没有 Thumb 才退回 Primary；两者都没有返回 null（调用方负责跳过它、继续往后凑）。
-   *
-   * 抽出来是因为有两条取封面的路径（批量 [loadFolderCoverBatch] 与单文件夹 [loadFolderCoverUrls]），
-   * 「Thumb 优于 Primary」这条偏好只能有一处，否则两边迟早选出不一样的脸。
-   */
-  private fun folderCoverUrlFor(
-    server: EmbyServer,
-    child: EmbyItem,
-    id: String,
-  ): String? {
-    val thumb = child.ImageTags["Thumb"]
-    val primary = child.ImageTags["Primary"]
-    return when {
-      thumb != null -> repository.imageUrl(server, id, "Thumb", thumb, maxWidth = 320)
-      primary != null -> repository.imageUrl(server, id, "Primary", primary, maxWidth = 320)
-      else -> null
-    }
-  }
-
   fun clearError() {
     _error.value = null
   }
@@ -1966,56 +1706,6 @@ class EmbyViewModel(application: Application, private val boundServer: EmbyServe
      * 一季 50 集已覆盖绝大多数剧；长剧（一季 100+ 集，多见于动画）会分页续拉。
      */
     const val EPISODE_PAGE_SIZE = 100
-
-    /**
-     * 文件夹宫格封面：顺序模式下每页翻多少条。
-     *
-     * 比只需要 4 张的缺口大得多，是为了**跳过没封面的条目**后还有余量能凑满 ——
-     * 一页 100 条足够覆盖绝大多数文件夹；极少数超大文件夹由 [FOLDER_COVER_MAX_PAGES] 兜底。
-     */
-    private const val FOLDER_COVER_PAGE_SIZE = 100
-
-    /** 顺序模式最多翻几页（100 × 3 = 300 条扫描上限），防止超大文件夹把设备拖住。 */
-    private const val FOLDER_COVER_MAX_PAGES = 3
-
-    /** 随机模式每次抽样的池子大小：抽一批再从里头挑有封面的。 */
-    private const val FOLDER_COVER_RANDOM_POOL = 48
-
-    /** 随机模式最多重抽几次：随机样本有波动，一两次抽不到 4 张有封面的就再抽一批。 */
-    private const val FOLDER_COVER_RANDOM_ATTEMPTS = 3
-
-    /**
-     * 批量取封面时每次取多少条。
-     *
-     * 之所以要**取多次**而不是「一次取够」：
-     * 顺序模式下子项在整棵子树里按名称全局排序，一次取不够时排在后面的文件夹一条都摸不到；
-     * 随机模式下每次都换一批样本，多取几次才能把每个文件夹都覆盖到。
-     */
-    private const val FOLDER_COVER_BATCH_PAGE_SIZE = 200
-
-    /**
-     * 批量取封面最多取样几次（顺序模式＝翻页，随机模式＝重抽）。
-     *
-     * 上限 `200 × 3 = 600` 条，兜住超大媒体库，同时不至于把库整个翻一遍。
-     */
-    private const val FOLDER_COVER_BATCH_MAX_PAGES = 3
-
-    /**
-     * 随机模式下每个文件夹多留几倍候选，供最后洗牌用。
-     *
-     * 与「凑满 4 张」无关 —— 4 张只是最终要的张数，多留几张才有随机可选的余地。
-     */
-    private const val FOLDER_COVER_BATCH_POOL_FACTOR = 3
-
-    /**
-     * 批量取封面时索要的字段 —— 只要「分组键 + 图片标记」。
-     *
-     * 这个参数的**唯一作用是把默认的大字段顶掉**：默认那份 `Fields` 带
-     * `MediaSources` / `Overview` / `People` / `Path` 等，一页几百条时响应体会大出一个数量级，
-     * 而拼一张宫格封面一个都用不上。`ImageTags` / `ParentId` 本身在基础 DTO 里就有，
-     * 列出来只是为了让「分组靠 ParentId、取图靠 ImageTags」在请求里一眼可见。
-     */
-    private const val FOLDER_COVER_FIELDS = "ParentId,ImageTags"
 
     /**
      * 全库搜索一次取多少条（清单 1.1 的例外，理由见 [searchGlobal] 的 KDoc）。

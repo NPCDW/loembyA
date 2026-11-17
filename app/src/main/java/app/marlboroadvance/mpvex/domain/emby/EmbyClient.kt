@@ -480,7 +480,7 @@ object EmbyClient {
   ))
 
   /**
-   * 通用分页查询。可用于：库内媒体、收藏夹、随机播放、按类型筛选等。
+   * 通用分页查询。可用于：库内媒体、收藏夹、推荐取样、按类型筛选等。
    *
    * @param parentId 父级 ID（库 ID 或剧集 ID 等）。null 表示查用户根。
    * @param sortBy 排序字段：DateCreated/DatePlayed/Name/ProductionYear/Random/...
@@ -656,7 +656,7 @@ object EmbyClient {
    *
    * - [parentId] 传相册 Id 时取该相册内的照片；传库 Id 时递归拉平整个库
    *   （混合库「仅照片」态走这条：不管服务端把照片放在哪个专辑里，全部倒出来）。
-   * - 排序传 `SortBy=Random` 即「随机一批照片」，供随机播放入口使用。
+   * - `SortBy=Random` 用于照片网格的随机排序浏览。
    * - 不传 `MediaTypes=Photo`：照片条目靠 `IncludeItemTypes=Photo` 已经圈死，
    *   再加 MediaTypes 属于重复过滤，且个别服务端对该参数的值域校验更严，
    *   多传一个反而可能整页拉空。
@@ -1629,10 +1629,7 @@ object EmbyClient {
     limit = limit,
   )
 
-  /**
-   * 随机播放：拿 [limit] 个随机项（按 Random 排序）。
-   * 用户可在播放页点"随机播放"调用，把返回的 IDs 依次送给 PlayerActivity。
-   */
+  /** Samples [limit] candidates for home/discover recommendations using server Random sorting. */
   fun getRandomItems(
     server: EmbyServer,
     parentId: String? = null,
@@ -1653,10 +1650,6 @@ object EmbyClient {
   // ════════════════════════════════════════════════════════════════════════
   // 2.5 相似推荐 / 即混（Instant Mix）/ 续播（NextUp）
   // ════════════════════════════════════════════════════════════════════════
-  // 这三个端点是**服务端算法**。客户端还另有一套本地打分算法（见
-  // `ui/browser/emby/discover/LocalSimilarity.kt`），两者由
-  // `SimilarAlgorithm` 偏好切换 —— 服务端没刮削或算法不产结果时，
-  // 本地那套能兜住，不至于整个区块空着。
 
   /**
    * 相似推荐：`GET /Items/{Id}/Similar`。

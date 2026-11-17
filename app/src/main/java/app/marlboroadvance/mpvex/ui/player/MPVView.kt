@@ -223,18 +223,8 @@ class MPVView(
     // lavf 的 HTTP 重连：中途断了接着拉，而不是直接判死
     MPVLib.setOptionString("stream-lavf-o", LAVF_STREAM_OPTS)
 
-    // The bundled demuxer supports temporary disk buffering, not cache-dir/cache-persize or
-    // persistent URL-indexed replay. Byte budgets above still bound the seekable streaming windows;
-    // there is no separately verified per-stream disk-size option or offline/download entry point.
+    // Native streaming buffers are RAM-only; user configuration must not enable disk media buffering.
     configureCacheOption("cache-on-disk", "no")
-    if (playerPreferences.diskCacheEnabled.get()) {
-      val dir = MpvDiskCache.ensureDir(context)
-      if (dir != null) {
-        configureCacheOption("demuxer-cache-dir", dir.absolutePath)
-        configureCacheOption("demuxer-cache-unlink-files", "yes")
-        configureCacheOption("cache-on-disk", "yes")
-      }
-    }
     
     val verbose = advancedPreferences.verboseLogging.get()
     val logLevel = if (verbose) "v" else "warn"
@@ -371,7 +361,7 @@ class MPVView(
 
   private fun setupAudioOptions() {
     // Disable MPV's automatic audio selection
-    // App will handle track selection manually via TrackSelector to respect user choices
+    // LoembyPlaybackCoordinator owns Emby track selection; manual controls may override it.
     MPVLib.setOptionString("alang", "")
     MPVLib.setOptionString("audio-delay", (audioPreferences.defaultAudioDelay.get() / 1000.0).toString())
     MPVLib.setOptionString("audio-pitch-correction", audioPreferences.audioPitchCorrection.get().toString())
@@ -389,7 +379,7 @@ class MPVView(
   // Setup
   private fun setupSubtitlesOptions() {
     // Disable MPV's automatic subtitle selection
-    // App will handle track selection manually via TrackSelector to respect user choices
+    // LoembyPlaybackCoordinator owns Emby track selection; manual controls may override it.
     MPVLib.setOptionString("slang", "")
     MPVLib.setOptionString("sub-auto", "no")
     MPVLib.setOptionString("sub-file-paths", "")

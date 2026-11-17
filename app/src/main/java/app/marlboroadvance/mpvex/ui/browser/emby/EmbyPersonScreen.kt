@@ -5,7 +5,6 @@ import androidx.compose.runtime.CompositionLocalProvider
 import app.marlboroadvance.mpvex.ui.browser.emby.components.LocalEmbyImageServer
 
 import android.app.Application
-import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -48,7 +47,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -86,7 +84,6 @@ import app.marlboroadvance.mpvex.presentation.Screen
 import app.marlboroadvance.mpvex.ui.browser.emby.components.EmbyImage
 import app.marlboroadvance.mpvex.ui.browser.emby.components.EmbyMediaCard
 import app.marlboroadvance.mpvex.ui.browser.emby.components.EmbySkeletonGrid
-import app.marlboroadvance.mpvex.ui.browser.emby.components.FavoriteHeartIcon
 import app.marlboroadvance.mpvex.ui.utils.LocalBackStack
 import app.marlboroadvance.mpvex.ui.utils.ScrollToTopOnOrderChange
 import app.marlboroadvance.mpvex.ui.utils.animateToTop
@@ -206,23 +203,6 @@ data class EmbyPersonScreen(
         val concrete = availableRoles.filter { it != PersonRoleFilter.ALL }
         if (concrete.size == 1) concrete[0].label else "人物"
       }
-
-    /**
-     * 随机播放：把**当前筛选出的**列表打乱后丢给主播放器排队连播。
-     *
-     * 取「当前可见列表」而不是全量：用户筛了「只看电影」或某个身份，随机播放就该只
-     * 在这些里抽。随机出的列表里常混着看过的剧，所以每条都从头放。
-     */
-    fun startRandomPlayback() {
-      val current = server ?: return
-      val limit = browserPreferences.randomPlayCount.get().coerceIn(1, 500)
-      val pool = visibleItems.shuffled().take(limit)
-      if (pool.isEmpty()) {
-        Toast.makeText(context, "当前筛选下没有可播放的作品", Toast.LENGTH_SHORT).show()
-        return
-      }
-      viewModel.launchRandomPlayback(current, pool)
-    }
 
     suspend fun load() {
       val current = server
@@ -426,18 +406,6 @@ data class EmbyPersonScreen(
             Icon(
               imageVector = Icons.AutoMirrored.Filled.ArrowBack,
               contentDescription = "返回",
-            )
-          }
-        },
-        actions = {
-          // ── 随机播放这位演员 / 导演的作品（在当前筛选范围内打乱连播）──
-          IconButton(
-            enabled = visibleItems.isNotEmpty(),
-            onClick = { startRandomPlayback() },
-          ) {
-            Icon(
-              imageVector = Icons.Default.Shuffle,
-              contentDescription = "随机播放作品",
             )
           }
         },

@@ -56,8 +56,6 @@ import app.marlboroadvance.mpvex.domain.emby.EmbyItem
 import app.marlboroadvance.mpvex.domain.emby.EmbyServer
 import app.marlboroadvance.mpvex.domain.emby.EmbyTicks
 import app.marlboroadvance.mpvex.domain.emby.displayTitle
-import app.marlboroadvance.mpvex.preferences.BrowserPreferences
-import app.marlboroadvance.mpvex.preferences.preference.collectAsState
 import app.marlboroadvance.mpvex.presentation.Screen
 import app.marlboroadvance.mpvex.ui.browser.emby.EmbyEmptyState
 import app.marlboroadvance.mpvex.ui.browser.emby.EmbyViewModel
@@ -71,14 +69,13 @@ import app.marlboroadvance.mpvex.ui.browser.emby.components.EmbyWideCard
 import app.marlboroadvance.mpvex.ui.utils.LocalBackStack
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
-import org.koin.compose.koinInject
 
 /**
  * 「猜你喜欢」独立页（清单 #14）。
  *
  * 三个区块，自上而下：
  * 1. **续播**（`/Shows/NextUp`）—— 服务端没开启时这一段**不显示**（不是错误）
- * 2. **相似推荐** —— 以用户选的「种子」为起点，算法由 `emby_similar_algorithm` 决定
+ * 2. **相似推荐** —— 以用户选的「种子」为起点，排序由服务端提供
  * 3. **即混** —— 攒一批可连播的内容，一键开始
  *
  * ## 为什么种子要用户自己选
@@ -100,14 +97,13 @@ object EmbyDiscoverScreen : Screen {
     val application = androidx.compose.ui.platform.LocalContext.current
       .applicationContext as Application
     val backStack = LocalBackStack.current
-    // `embyVm.play` 是 suspend（要预解析直链），所以每个播放入口都得有 scope
+    // `embyVm.play` 是 suspend（准备播放会话），所以每个播放入口都得有 scope
     val scope = rememberCoroutineScope()
 
     val vm: SimilarRecommendationViewModel = viewModel(
       factory = SimilarRecommendationViewModel.factory(application),
     )
     val embyVm: EmbyViewModel = viewModel(factory = EmbyViewModel.factory(application))
-    val preferences: BrowserPreferences = koinInject()
 
     val server by embyVm.currentServer.collectAsState()
     CompositionLocalProvider(LocalEmbyImageServer provides server) {
@@ -119,21 +115,14 @@ object EmbyDiscoverScreen : Screen {
     val nextUp by vm.nextUp.collectAsState()
     val loading by vm.loading.collectAsState()
     val error by vm.error.collectAsState()
-    val lastAlgorithm by vm.lastAlgorithm.collectAsState()
 
-    val algorithm by preferences.embySimilarAlgorithm.collectAsState()
-    // 即混网格的列数走**自己的**偏好 `embyMixGridColumns`，不复用媒体库那一项。
-    // 版式仍然照媒体库来（同样的 [EmbyMediaCard] + 海报比例），只有「几列」分开调 ——
-    // 媒体库列数是跟着屏幕宽窄定的，即混是一批推荐，用户想看的密度跟它不一样。
-    // 默认值与媒体库相同（3），所以不改设置时两边观感一致。
-    val gridColumns by preferences.embyMixGridColumns.collectAsState()
+    val gridColumns = 3
 
     var seed by remember { mutableStateOf<EmbyItem?>(null) }
     var seedPickerShown by remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
 
-    // 种子选好才拉推荐。没种子时只拉「续播」——
-    // 那是不需要种子的唯一一块，白拉另外两个只会得到 404 或空列表。
+    // Seedless discovery retains NextUp and the existing random sample; Similar needs a seed.
     LaunchedEffect(server?.id, seed?.Id) {
       val current = server ?: return@LaunchedEffect
       vm.loadAll(current, seed)
@@ -193,13 +182,12 @@ object EmbyDiscoverScreen : Screen {
         item {
           SeedRow(
             seed = seed,
-            algorithm = algorithm,
             onClick = { seedPickerShown = true },
           )
         }
 
         // 首屏加载：一块内容都还没有 ⇒ 摆骨架预告版式，别在种子条底下孤零零转个圈。
-        // 已经有内容了还在转 ⇒ 那是换种子/换算法后的刷新，用小转圈当页脚即可
+        // 已经有内容了还在转 ⇒ 那是换种子后的刷新，用小转圈当页脚即可
         //（同 PagingFooter 的约定：整屏 loading 和页脚 loading 不同时出现）。
         if (loading && nextUp.isEmpty() && similar.isEmpty() && mix.isEmpty()) {
           item { EmbySkeletonSection() }
@@ -272,8 +260,7 @@ object EmbyDiscoverScreen : Screen {
               contentPadding = PaddingValues(horizontal = 16.dp),
               horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-              items(similar, key = { it.item.Id ?: it.item.hashCode().toString() }) { entry ->
-                val item = entry.item
+              items(similar, key = { it.Id ?: it.hashCode().toString() }) { item ->
                 EmbyMediaCard(
                   title = item.displayTitle(),
                   contentDescription = item.Name,
@@ -282,8 +269,6 @@ object EmbyDiscoverScreen : Screen {
                   progress = item.UserData?.PlayedPercentage?.takeIf { !item.UserData.Played }
                     ?.let { it / 100.0 }?.toFloat(),
                   isFavorite = item.UserData?.IsFavorite == true,
-                  // 理由只在本地算法下有 —— 服务端算法我们不知道它凭什么排的
-                  badgeText = entry.reason(),
                   onClick = {
                     val current = server ?: return@EmbyMediaCard
                     openEmbyMediaCard(item,
@@ -306,10 +291,8 @@ object EmbyDiscoverScreen : Screen {
                 TextButton(
                   onClick = {
                     val current = server ?: return@TextButton
-                    // playFromStartAll 的语义由 launchRandomPlayback 内部固定：
-                    // 即有混列表常混着看过的剧，切到下一部时恢复续播会直接跳到片尾就结束；
-                    // 它同时会在起播前替首条探一次直链（strm 条目的首次 probe 很慢）。
-                    embyVm.launchRandomPlayback(current, mix)
+                    // Preserve the sampled order and start every queue entry from the beginning.
+                    embyVm.launchFromStartPlayback(current, mix)
                   },
                 ) {
                   Icon(Icons.Default.PlayArrow, contentDescription = null, Modifier.size(18.dp))
@@ -324,7 +307,7 @@ object EmbyDiscoverScreen : Screen {
           item {
             // 即混用**网格**而不是横滑行：这一块是「一攒可连播的内容」，
             // 用户要的是一眼扫过去有多少、横着滑反而看不到全貌。
-            // 版式与媒体库网格一致（同样的海报比例 / 列数偏好 / 卡片组件）。
+            // 版式与媒体库网格一致（同样的海报比例 / 三列 / 卡片组件）。
             EmbyChunkedPosterGrid(
               items = mix,
               columns = gridColumns,
@@ -387,7 +370,7 @@ object EmbyDiscoverScreen : Screen {
  * - 高度由内容自然决定，不用手算；
  * - 列数变了不用改任何布局代码；
  * - 复用媒体库同一个 [EmbyMediaCard]，所以卡片长相与媒体库完全一致
- *   （这也是用户要求的「参考媒体库的布局」）；只有「几列」走自己的偏好。
+ *   （这也是用户要求的「参考媒体库的布局」）；固定采用三列。
  *
  * 末行不足 `columns` 个时用 `Spacer(weight)` 补位，避免最后一行卡片被拉宽。
  */
@@ -459,16 +442,10 @@ private fun nextUpProgress(item: EmbyItem): Float? {
   return ((position.toDouble() / total.toDouble()).coerceIn(0.0, 1.0)).toFloat()
 }
 
-/**
- * 顶部「当前种子 + 算法」条。
- *
- * 算法名**必须显示出来**：本地算法和服务端算法的结果质量差别不小，
- * 用户看到不满意的推荐时，第一个要能判断的就是「这是不是本地算的」。
- */
+/** Current recommendation seed; ranking is always supplied by the server. */
 @Composable
 private fun SeedRow(
   seed: EmbyItem?,
-  algorithm: SimilarAlgorithm,
   onClick: () -> Unit,
 ) {
   Column(
@@ -481,10 +458,7 @@ private fun SeedRow(
       Text(seed?.Name ?: "选择种子")
     }
     Text(
-      text = "算法：" + when (algorithm) {
-        SimilarAlgorithm.EMBY -> "服务端"
-        SimilarAlgorithm.LOCAL -> "本地"
-      },
+      text = "推荐来源：服务端",
       style = MaterialTheme.typography.labelSmall,
       color = MaterialTheme.colorScheme.onSurfaceVariant,
     )

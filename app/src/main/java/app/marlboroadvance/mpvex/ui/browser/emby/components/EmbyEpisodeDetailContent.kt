@@ -77,8 +77,6 @@ import app.marlboroadvance.mpvex.ui.browser.emby.PagedList
 import app.marlboroadvance.mpvex.ui.browser.emby.PagedResult
 import app.marlboroadvance.mpvex.ui.browser.emby.pagingSource
 import app.marlboroadvance.mpvex.ui.browser.emby.rememberDetailPage
-import app.marlboroadvance.mpvex.ui.browser.emby.rememberPredictivePreloadDistance
-import app.marlboroadvance.mpvex.preferences.BrowserPreferences
 import org.koin.compose.koinInject
 import app.marlboroadvance.mpvex.ui.utils.longPressToCopy
 import app.marlboroadvance.mpvex.ui.utils.scrollToTop
@@ -109,7 +107,6 @@ internal fun EmbyMediaDetailContent(
   val context = LocalContext.current
   val focusManager = LocalFocusManager.current
   val scope = rememberCoroutineScope()
-  val preloadDistance = rememberPredictivePreloadDistance(koinInject<BrowserPreferences>())
   val sources = item.MediaSources.orEmpty()
   val sourceIdentity = sources.map { it.Id to it.MediaStreams.orEmpty().map { stream -> stream.Type to stream.Index } }.toString()
   var baseline by rememberSaveable(item.Id, server.sourceKey, server.remoteId, sourceIdentity, stateSaver = EpisodeSelectionSaver) {
@@ -247,7 +244,7 @@ internal fun EmbyMediaDetailContent(
   }
   if (isEpisode) {
     page.AutoLoadMore(episodesState.pagingSource(), enabled = parents != null && !locating && !page.loading && page.error == null,
-      distance = preloadDistance, loader = loader)
+      loader = loader)
   }
 
   fun startPlayback(fromStart: Boolean = false, forceDirect: Boolean = false) {

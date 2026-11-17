@@ -94,7 +94,7 @@ object EmbyPlaybackReporter {
   /**
    * 由播放页提供的「当前正在播的是哪一条」。
    *
-   * 本类拿不到 Compose 队列下标，重排或随机播放也会使 intent 原始顺序失效。
+   * 本类拿不到 Compose 队列下标，重排也会使 intent 原始顺序失效。
    * 使用 `PlayerActivity.currentEmbyItemId()` 提供的当前队列身份，避免复制路径反查逻辑。
    * 302 后的 CDN 路径不再含 Emby itemId，仅凭 URL 正则会把连播错误归到起播条目。
    * 返回 null 表示列表尚未就绪，此时退回路径反查。

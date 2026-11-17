@@ -16,7 +16,6 @@ class SubtitlesPreferences(
   preferenceStore: PreferenceStore,
 ) {
   val preferredLanguages = preferenceStore.getString("sub_preferred_languages")
-  val autoloadMatchingSubtitles = preferenceStore.getBoolean("sub_autoload_enabled", true)
 
   val fontsFolder = preferenceStore.getString("sub_fonts_folder")
   val font = preferenceStore.getString("sub_font", "")

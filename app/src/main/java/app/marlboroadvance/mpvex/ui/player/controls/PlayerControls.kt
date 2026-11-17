@@ -95,7 +95,7 @@ import app.marlboroadvance.mpvex.ui.browser.emby.components.EmbyImage
 import app.marlboroadvance.mpvex.ui.player.CacheTimeline
 import app.marlboroadvance.mpvex.ui.player.Decoder.Companion.getDecoderFromValue
 import app.marlboroadvance.mpvex.ui.player.Panels
-import app.marlboroadvance.mpvex.ui.player.PlaybackMemory
+import app.marlboroadvance.mpvex.ui.player.PlayerControlAutoHidePolicy
 import app.marlboroadvance.mpvex.ui.player.PlayerActivity
 import app.marlboroadvance.mpvex.ui.player.PlayerViewModel
 import app.marlboroadvance.mpvex.ui.player.Sheets
@@ -170,7 +170,9 @@ fun PlayerControls(
   val isPortrait = LocalConfiguration.current.orientation == Configuration.ORIENTATION_PORTRAIT
   val showSystemStatusBar by playerPreferences.showSystemStatusBar.collectAsState()
   val showSystemNavigationBar by playerPreferences.showSystemNavigationBar.collectAsState()
-  val autoHideMillis by playerPreferences.playerTimeToDisappear.collectAsState()
+  val storedAutoHideMillis by playerPreferences.playerTimeToDisappear.collectAsState()
+  val autoHideMillis = PlayerControlAutoHidePolicy.normalize(storedAutoHideMillis)
+  val autoHideDelay = PlayerControlAutoHidePolicy.delayMillis(autoHideMillis)
   val interaction = remember { MutableInteractionSource() }
   var resetControlsTimestamp by remember { mutableLongStateOf(0L) }
   var isSeeking by remember { mutableStateOf(false) }
@@ -202,9 +204,9 @@ fun PlayerControls(
     }
   }
 
-  LaunchedEffect(controlsShown, paused, isSeeking, isUnlockDragging, resetControlsTimestamp) {
-    if (controlsShown && paused == false && !isSeeking && !isUnlockDragging) {
-      delay(autoHideMillis.toLong())
+  LaunchedEffect(controlsShown, paused, isSeeking, isUnlockDragging, resetControlsTimestamp, autoHideMillis) {
+    if (autoHideDelay != null && controlsShown && paused == false && !isSeeking && !isUnlockDragging) {
+      delay(autoHideDelay)
       viewModel.hideControls()
     }
   }
@@ -296,8 +298,8 @@ fun PlayerControls(
         )
         VerticalSpeedControl(
           speed = speed,
-          onDecrease = { updateSpeed(speed - 0.05f, playerPreferences, viewModel) },
-          onIncrease = { updateSpeed(speed + 0.05f, playerPreferences, viewModel) },
+          onDecrease = { updateSpeed(speed - 0.05f, viewModel) },
+          onIncrease = { updateSpeed(speed + 0.05f, viewModel) },
           onOpen = { onOpenSheet(Sheets.PlaybackSpeed) },
           modifier = Modifier.align(Alignment.CenterEnd).padding(end = 18.dp),
         )
@@ -374,14 +376,7 @@ fun PlayerControls(
       sheetShown = sheetShown,
       subtitles = subtitles.toImmutableList(),
       onAddSubtitle = viewModel::addSubtitle,
-      onToggleSubtitle = { id ->
-        viewModel.toggleSubtitle(id)
-        if (viewModel.isSubtitleSelected(id)) {
-          subtitles.find { it.id == id }?.let {
-            PlaybackMemory.saveSubtitleTrack(playerPreferences, viewModel.seriesKey, it)
-          }
-        }
-      },
+      onToggleSubtitle = viewModel::toggleSubtitle,
       isSubtitleSelected = viewModel::isSubtitleSelected,
       onDisableSubtitles = {
         PlayerLib.setPropertyString("secondary-sid", "no")
@@ -395,20 +390,19 @@ fun PlayerControls(
           PlayerLib.setPropertyBoolean("aid", false)
         } else {
           PlayerLib.setPropertyInt("aid", track.id)
-          PlaybackMemory.saveAudioTrack(playerPreferences, viewModel.seriesKey, track)
         }
       },
       decoder = decoder,
       onUpdateDecoder = { PlayerLib.setPropertyString("hwdec", it.value) },
       speed = speed,
       speedPresets = speedPresets.mapNotNull(String::toFloatOrNull).sorted(),
-      onSpeedChange = { updateSpeed(it, playerPreferences, viewModel) },
+      onSpeedChange = { updateSpeed(it, viewModel) },
       onAddSpeedPreset = { playerPreferences.speedPresets += it.toFixed(2).toString() },
       onRemoveSpeedPreset = { playerPreferences.speedPresets -= it.toFixed(2).toString() },
       onResetSpeedPresets = playerPreferences.speedPresets::delete,
       onMakeDefaultSpeed = { playerPreferences.defaultSpeed.set(it.toFixed(2)) },
       onResetDefaultSpeed = {
-        PlayerLib.setPropertyFloat("speed", playerPreferences.defaultSpeed.deleteAndGet().toFixed(2))
+        viewModel.changePlaybackSpeed(playerPreferences.defaultSpeed.deleteAndGet().toFixed(2))
       },
       onOpenPanel = onOpenPanel,
       onDismissRequest = { onOpenSheet(Sheets.None) },
@@ -834,11 +828,8 @@ private fun safeDuration(position: Float, precise: Float, integer: Int?): Float 
 
 private fun updateSpeed(
   requested: Float,
-  preferences: PlayerPreferences,
   viewModel: PlayerViewModel,
 ) {
   val value = (Math.round(requested.coerceIn(0.1f, 4f) * 20f) / 20f).toFixed(2)
-  PlayerLib.setPropertyFloat("speed", value)
-  PlaybackMemory.saveSpeed(preferences, viewModel.seriesKey, value)
-  if (preferences.rememberGlobalSpeed.get()) preferences.lastPlaybackSpeed.set(value)
+  viewModel.changePlaybackSpeed(value)
 }
